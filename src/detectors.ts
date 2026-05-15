@@ -220,17 +220,32 @@ export function detectDomainServices(ctx: DomainContext): ComputedConcept[] {
 
 /**
  * Bounded context — L3 cluster with ≥ `minClusterSize` members
- * (default 3), uniform layer assignment when L4 has run, and
+ * (default 3), ≥ `minVocabularySize` distinct identifier terms
+ * (default 5), uniform layer assignment when L4 has run, and
  * distinctive identifier vocabulary (the cluster has terms not
- * widely present in other clusters).
+ * widely present in other clusters; default ratio ≥ 0.4).
  *
  * Returns one `bounded-context` concept per qualifying cluster.
+ *
+ * Thresholds tightened 2026-05-15 per Fathom row 3.2.4: original
+ * `distinctiveness < 0.2` filter flagged 313 of 578 clusters as
+ * bounded contexts on the Fathom workspace because the threshold was
+ * too permissive at the call-edge-sparse end of the distribution and
+ * no minimum-vocabulary floor existed. New defaults: distinctiveness
+ * ≥ 0.4 + ≥ 5 distinct terms. Both are configurable for downstream
+ * workloads.
  */
 export function detectBoundedContexts(
   ctx: DomainContext,
-  options: { minClusterSize?: number } = {},
+  options: {
+    minClusterSize?: number;
+    minVocabularySize?: number;
+    minDistinctiveness?: number;
+  } = {},
 ): ComputedConcept[] {
   const minSize = options.minClusterSize ?? 3;
+  const minVocab = options.minVocabularySize ?? 5;
+  const minDistinctiveness = options.minDistinctiveness ?? 0.4;
   if (ctx.clusters.length === 0) return [];
 
   // Build per-cluster term frequencies from member element names.
@@ -279,13 +294,14 @@ export function detectBoundedContexts(
 
     // Vocabulary distinctiveness: ratio of cluster-unique terms.
     const tf = termFreqByCluster.get(cluster.clusterId) ?? new Map();
+    if (tf.size < minVocab) continue;
     let uniqueTerms = 0;
     for (const term of tf.keys()) {
       const df = documentFrequency.get(term) ?? 0;
       if (df === 1) uniqueTerms += 1;
     }
     const distinctiveness = tf.size === 0 ? 0 : uniqueTerms / tf.size;
-    if (distinctiveness < 0.2) continue;
+    if (distinctiveness < minDistinctiveness) continue;
 
     let score = 0.5;
     score += Math.min(0.3, distinctiveness * 0.5);

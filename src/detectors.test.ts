@@ -186,22 +186,30 @@ test("detectBoundedContexts — fires on cluster with ≥3 members + distinct vo
       { id: "e1", name: "OrderService", kind: "class" },
       { id: "e2", name: "OrderRepository", kind: "class" },
       { id: "e3", name: "OrderItem", kind: "class" },
+      { id: "e7", name: "OrderCheckout", kind: "class" },
+      { id: "e8", name: "OrderConfirmation", kind: "class" },
       // A second cluster with different vocabulary.
       { id: "e4", name: "PaymentGateway", kind: "class" },
       { id: "e5", name: "PaymentProvider", kind: "class" },
       { id: "e6", name: "PaymentResult", kind: "class" },
+      { id: "e9", name: "PaymentReceipt", kind: "class" },
+      { id: "e10", name: "PaymentAuthorization", kind: "class" },
     ],
     clusters: [
-      { clusterId: "orders", name: "orders", memberCount: 3 },
-      { clusterId: "payments", name: "payments", memberCount: 3 },
+      { clusterId: "orders", name: "orders", memberCount: 5 },
+      { clusterId: "payments", name: "payments", memberCount: 5 },
     ],
     clusterByElement: new Map([
       ["e1", "orders"],
       ["e2", "orders"],
       ["e3", "orders"],
+      ["e7", "orders"],
+      ["e8", "orders"],
       ["e4", "payments"],
       ["e5", "payments"],
       ["e6", "payments"],
+      ["e9", "payments"],
+      ["e10", "payments"],
     ]),
   });
   const out = detectBoundedContexts(ctx);
@@ -224,4 +232,91 @@ test("detectBoundedContexts — doesn't fire on cluster below minClusterSize", (
     ]),
   });
   assert.equal(detectBoundedContexts(ctx, { minClusterSize: 3 }).length, 0);
+});
+
+// Fathom row 3.2.4 regression suite — tightened thresholds 2026-05-15
+// after the Phase 3 smoke flagged 313/578 clusters as bounded contexts
+// on the Fathom workspace. Defaults now: distinctiveness ≥ 0.4, ≥ 5
+// distinct vocabulary terms (was: 0.2 / no vocab floor).
+
+test("detectBoundedContexts — doesn't fire when vocabulary below minVocabularySize (3.2.4 regression)", () => {
+  // 3-member cluster with only 3 distinct terms — below the 5-term
+  // floor. Under the old code (no vocab floor + 0.2 distinctiveness
+  // threshold), this would have fired because all 3 terms are unique
+  // to the cluster (distinctiveness = 1.0).
+  const ctx = buildContext({
+    elements: [
+      { id: "e1", name: "Foo", kind: "class" },
+      { id: "e2", name: "Bar", kind: "class" },
+      { id: "e3", name: "Baz", kind: "class" },
+    ],
+    clusters: [{ clusterId: "tiny", name: "tiny", memberCount: 3 }],
+    clusterByElement: new Map([
+      ["e1", "tiny"],
+      ["e2", "tiny"],
+      ["e3", "tiny"],
+    ]),
+  });
+  // Only 3 distinct terms (foo, bar, baz) — below the 5-term floor.
+  assert.equal(detectBoundedContexts(ctx).length, 0);
+});
+
+test("detectBoundedContexts — doesn't fire when distinctiveness below 0.4 (3.2.4 regression)", () => {
+  // Two clusters that share most of their vocabulary — distinctiveness
+  // is 0 for both (every term appears in both clusters). Under the old
+  // 0.2 threshold this would have fired in some borderline cases;
+  // raising to 0.4 plus the 5-term floor cleans up these noisy
+  // detections systematically.
+  const ctx = buildContext({
+    elements: [
+      { id: "e1", name: "DataReaderHelper", kind: "class" },
+      { id: "e2", name: "DataWriterHelper", kind: "class" },
+      { id: "e3", name: "DataValidatorHelper", kind: "class" },
+      { id: "e4", name: "DataReaderUtil", kind: "class" },
+      { id: "e5", name: "DataWriterUtil", kind: "class" },
+      { id: "e6", name: "DataValidatorUtil", kind: "class" },
+    ],
+    clusters: [
+      { clusterId: "helpers", name: "helpers", memberCount: 3 },
+      { clusterId: "utils", name: "utils", memberCount: 3 },
+    ],
+    clusterByElement: new Map([
+      ["e1", "helpers"],
+      ["e2", "helpers"],
+      ["e3", "helpers"],
+      ["e4", "utils"],
+      ["e5", "utils"],
+      ["e6", "utils"],
+    ]),
+  });
+  // helpers vocab: data, reader, writer, validator, helper — 5 terms
+  // utils vocab:   data, reader, writer, validator, util    — 5 terms
+  // distinctiveness for both ≈ 1/5 = 0.2 (only the suffix is unique).
+  // Below the 0.4 floor → neither fires.
+  assert.equal(detectBoundedContexts(ctx).length, 0);
+});
+
+test("detectBoundedContexts — options can loosen thresholds for permissive callers (3.2.4)", () => {
+  // Same fixture as the negative vocab-floor case above. Passing
+  // looser options recovers the v1 behavior for callers that want
+  // permissive detection.
+  const ctx = buildContext({
+    elements: [
+      { id: "e1", name: "Foo", kind: "class" },
+      { id: "e2", name: "Bar", kind: "class" },
+      { id: "e3", name: "Baz", kind: "class" },
+    ],
+    clusters: [{ clusterId: "tiny", name: "tiny", memberCount: 3 }],
+    clusterByElement: new Map([
+      ["e1", "tiny"],
+      ["e2", "tiny"],
+      ["e3", "tiny"],
+    ]),
+  });
+  // With loosened options, the 3-term tiny cluster fires again.
+  const out = detectBoundedContexts(ctx, {
+    minVocabularySize: 2,
+    minDistinctiveness: 0.1,
+  });
+  assert.equal(out.length, 1);
 });
