@@ -28,6 +28,29 @@ const FIELD_KINDS: ReadonlySet<string> = new Set(["field", "property"]);
 const METHOD_KINDS: ReadonlySet<string> = new Set([
   "method", "function", "constructor", "accessor", "operator",
 ]);
+/**
+ * High-signal element kinds for `realizedBy` edges. Fathom row 5.1.5.1:
+ * pre-fix, bounded-contexts emitted `realizedBy` to every element in
+ * their cluster — parameters and type-parameters dominated the set,
+ * shadowing the actual class/interface members in downstream
+ * consumers (LLM-namer prompt rows, MCP responses). Now we filter to
+ * elements that *meaningfully realize a concept*: classes, structs,
+ * enums, interfaces, methods, functions, constructors. Parameters /
+ * type-parameters / fields / variables / imports stay out — they're
+ * substrate noise at this layer.
+ */
+const REALIZED_BY_KINDS: ReadonlySet<string> = new Set([
+  "class",
+  "struct",
+  "enum",
+  "interface",
+  "type-alias",
+  "method",
+  "function",
+  "constructor",
+  "accessor",
+  "operator",
+]);
 
 function classes(ctx: DomainContext): DomainElement[] {
   return ctx.elements.filter((e) => CLASS_KINDS.has(e.kind));
@@ -308,13 +331,20 @@ export function detectBoundedContexts(
     if (layerOk) score += 0.1;
     if (members.length >= 5) score += 0.1;
 
+    // Fathom row 5.1.5.1: filter realizedBy to high-signal kinds so
+    // downstream consumers (Haiku-namer prompts, MCP responses) see
+    // the classes/interfaces/methods that actually realize the
+    // bounded-context, not parameter/type-param noise.
+    const realizedBy = members.filter((m) => REALIZED_BY_KINDS.has(m.kind));
+    if (realizedBy.length === 0) continue;
+
     out.push({
       conceptKind: "bounded-context",
       name: cluster.displayName ?? cluster.name,
       clusterId: cluster.clusterId,
       language: uniformLanguage(members),
       confidenceScore: Math.min(1, score),
-      realizedByElementIds: members.map((m) => m.id),
+      realizedByElementIds: realizedBy.map((m) => m.id),
     });
   }
   return out;

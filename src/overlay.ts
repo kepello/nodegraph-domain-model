@@ -121,9 +121,24 @@ export class DomainModelOverlayImpl implements DomainModelOverlay {
       includeDangling: true,
     });
     const existingTargets = new Set<string>();
+    const existingEdgeByTarget = new Map<string, string>();
     for (const e of existing) {
-      if (e.targetId !== null) existingTargets.add(e.targetId);
-      if (e.targetRef !== null) existingTargets.add(e.targetRef);
+      const key = e.targetId ?? e.targetRef;
+      if (key === null) continue;
+      existingTargets.add(key);
+      existingEdgeByTarget.set(key, e.id);
+    }
+    const wantedTargets = new Set(targets);
+    // Fathom row 5.1.5.1: tombstone stale outgoing edges whose target
+    // isn't in the new emission. Without this, repeated re-emits with
+    // shrinking realizedBy sets (e.g., after the high-signal-kind filter
+    // landed) accumulate live edges from prior runs — the overlay's
+    // own contentHash-equality fast-path means no supersede fires and
+    // the substrate cascade can't clean up.
+    for (const [target, edgeId] of existingEdgeByTarget) {
+      if (!wantedTargets.has(target)) {
+        this.graph.tombstoneEdge(edgeId);
+      }
     }
     for (const target of targets) {
       if (existingTargets.has(target)) continue;

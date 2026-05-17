@@ -2,6 +2,25 @@
 
 All notable changes to `@kepello/nodegraph-domain-model`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.0] — 2026-05-17
+
+Fix — `detectBoundedContexts` filters `realizedBy` to high-signal element kinds. Closes Fathom row 5.1.5.1.
+
+### Fixed
+
+- Pre-fix, bounded-context concepts emitted `realizedBy` edges to every element in their cluster — including parameters, type-parameters, fields, variables. Downstream consumers reading the realizedBy set (LLM-namer prompts, MCP responses) saw parameter NAMES (`input`, `options`, `id`) dominating instead of the class/interface/method TYPE TOKENS that carry concept signal.
+- New filter restricts realizedBy to `class / struct / enum / interface / type-alias / method / function / constructor / accessor / operator`. Parameters / type-parameters / fields / variables / imports stay excluded.
+- Bounded-contexts with zero high-signal members after filtering are dropped (no longer emitted as concepts).
+
+### Impact
+
+- 5.1.5 Haiku-namer prompts that previously saw 30 `(parameter)` rows now see ~10–20 class/interface/method rows. Verified on the Fathom workspace: top bounded-context's realizedBy was 159 parameter elements pre-fix; post-fix is the 18 interfaces in the file.
+- Existing live concepts persist until the next `fathom analyze` run, which tombstones stale concepts via the 5.1.4.1 tombstone-stale-concepts pass.
+
+### Tests
+
+- 27/27 domain-model tests pass. No new test in this ship — the existing test suite covers the detector with class-kind fixtures, which still pass; the change is a filter on real-graph data that test fixtures don't exercise.
+
 ## [0.2.0] — 2026-05-15
 
 Closes Fathom row `l7b-bounded-context-threshold-tuning` (3.2.4) — fourth Tier-1 fix from the 2026-05-14 Phase 3 smoke. Bounded-context detection is no longer over-permissive when call edges are sparse.
