@@ -24,6 +24,17 @@ export interface ComputedConcept {
 }
 
 const CLASS_KINDS: ReadonlySet<string> = new Set(["class", "struct"]);
+/**
+ * Fathom row 5.0.17: TS expresses many value objects as `interface`
+ * declarations rather than classes (no methods, just shape). Including
+ * interface + type-alias in the value-object pass surfaces them.
+ */
+const VALUE_SHAPE_KINDS: ReadonlySet<string> = new Set([
+  "class",
+  "struct",
+  "interface",
+  "type-alias",
+]);
 const FIELD_KINDS: ReadonlySet<string> = new Set(["field", "property"]);
 const METHOD_KINDS: ReadonlySet<string> = new Set([
   "method", "function", "constructor", "accessor", "operator",
@@ -98,13 +109,25 @@ export function detectEntities(ctx: DomainContext): ComputedConcept[] {
 }
 
 /**
- * Value object — class with L1 classStereotype `data-class` AND no
- * mutator-shaped method children (immutability heuristic). Lower
- * confidence than entities because the `data-class` + immutability
- * combination has more false positives.
+ * Value object — two paths:
+ *
+ *  - Classic: class / struct with L1 classStereotype `data-class` AND
+ *    no mutator-shaped method children.
+ *  - TS / interface-shaped (Fathom 5.0.17): interface or type-alias
+ *    with ≥ 2 field-shaped properties and no method children. TS
+ *    expresses many domain value objects as interfaces (no methods,
+ *    just shape) — `data-class` stereotype is impossible for
+ *    interfaces because the stereotype derivation short-circuits to
+ *    `interface` at the top of the rule cascade.
+ *
+ * Lower confidence than entities because the data-class /
+ * shape-only combination has more false positives.
  */
 export function detectValueObjects(ctx: DomainContext): ComputedConcept[] {
   const out: ComputedConcept[] = [];
+  const seenIds = new Set<string>();
+
+  // Path 1 — classic data-class.
   for (const cls of classes(ctx)) {
     const stereo = ctx.classStereotypes.get(cls.id);
     if (stereo !== "data-class") continue;
@@ -125,7 +148,31 @@ export function detectValueObjects(ctx: DomainContext): ComputedConcept[] {
       confidenceScore: score,
       realizedByElementIds: [cls.id],
     });
+    seenIds.add(cls.id);
   }
+
+  // Path 2 — interface / type-alias shape (Fathom 5.0.17).
+  for (const el of ctx.elements) {
+    if (!VALUE_SHAPE_KINDS.has(el.kind)) continue;
+    if (CLASS_KINDS.has(el.kind)) continue; // already handled above
+    if (seenIds.has(el.id)) continue;
+    const fields = fieldChildren(ctx, el.id);
+    if (fields.length < 2) continue;
+    const methods = methodChildren(ctx, el.id);
+    if (methods.length > 0) continue; // pure shape only
+    let score = 0.6;
+    if (fields.length >= 3) score += 0.1;
+    if (fields.length >= 5) score += 0.05;
+    out.push({
+      conceptKind: "value-object",
+      name: el.name,
+      clusterId: ctx.clusterByElement.get(el.id),
+      language: el.language,
+      confidenceScore: score,
+      realizedByElementIds: [el.id],
+    });
+  }
+
   return out;
 }
 

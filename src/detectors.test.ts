@@ -104,6 +104,49 @@ test("detectValueObjects — doesn't fire when data-class has a mutator method",
   assert.equal(detectValueObjects(ctx).length, 0);
 });
 
+test("detectValueObjects — fires on TS interface with ≥ 2 fields and no methods (Fathom 5.0.17)", () => {
+  // TS expresses many value objects as `interface` (pure shape, no
+  // methods). The `data-class` stereotype is impossible for interfaces
+  // because stereotypes.ts short-circuits to `interface` first; without
+  // the interface-shape path, TS value objects are invisible to L7b.
+  const ctx = buildContext({
+    elements: [
+      { id: "Money", name: "Money", kind: "interface" },
+      { id: "Money.amount", name: "amount", kind: "field" },
+      { id: "Money.currency", name: "currency", kind: "field" },
+    ],
+    childrenOf: new Map([["Money", ["Money.amount", "Money.currency"]]]),
+  });
+  const out = detectValueObjects(ctx);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].conceptKind, "value-object");
+  assert.equal(out[0].name, "Money");
+});
+
+test("detectValueObjects — doesn't fire on TS interface with fewer than 2 fields", () => {
+  const ctx = buildContext({
+    elements: [
+      { id: "X", name: "X", kind: "interface" },
+      { id: "X.a", name: "a", kind: "field" },
+    ],
+    childrenOf: new Map([["X", ["X.a"]]]),
+  });
+  assert.equal(detectValueObjects(ctx).length, 0);
+});
+
+test("detectValueObjects — doesn't fire on TS interface with method children", () => {
+  const ctx = buildContext({
+    elements: [
+      { id: "Repo", name: "Repo", kind: "interface" },
+      { id: "Repo.id", name: "id", kind: "field" },
+      { id: "Repo.name", name: "name", kind: "field" },
+      { id: "Repo.save", name: "save", kind: "method" },
+    ],
+    childrenOf: new Map([["Repo", ["Repo.id", "Repo.name", "Repo.save"]]]),
+  });
+  assert.equal(detectValueObjects(ctx).length, 0);
+});
+
 // --- detectAggregateRoots -------------------------------------------------
 
 test("detectAggregateRoots — fires on entity with the most inbound refs in cluster", () => {

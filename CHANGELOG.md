@@ -2,6 +2,21 @@
 
 All notable changes to `@kepello/nodegraph-domain-model`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.0] — 2026-05-18
+
+Fix — `detectValueObjects` adds a second detection path for TS-style interface/type-alias value objects. Closes Fathom row 5.0.17 (a).
+
+### Fixed
+
+- Previous behavior: `detectValueObjects` only fired on `class`/`struct` with L1 classStereotype `data-class`. TS expresses many value objects as pure `interface` declarations (no methods, just shape) — but `interface` short-circuits to `interface` stereotype at the top of the rule cascade, so `data-class` was never reachable for interfaces. Result on Fathom: zero TS value objects recovered despite dozens of `XInput` / `XMetadata` / `XResult` interface shapes.
+- New behavior: a second path fires on `interface` / `type-alias` elements with ≥ 2 field-shaped properties and no method children. Confidence scales with field count (0.6 base, +0.1 at ≥ 3 fields, +0.05 at ≥ 5).
+- Path 1 (classic data-class) unchanged. The two paths use a `seenIds` set to avoid double-counting an element if it somehow matches both.
+
+### Tests
+
+- 3 new regression tests: fires on TS interface with ≥ 2 fields and no methods; doesn't fire on 1-field interface; doesn't fire on interface with method children.
+- All 30/30 package tests pass.
+
 ## [0.3.0] — 2026-05-17
 
 Fix — `detectBoundedContexts` filters `realizedBy` to high-signal element kinds. Closes Fathom row 5.1.5.1.
