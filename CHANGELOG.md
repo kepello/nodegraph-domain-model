@@ -2,6 +2,24 @@
 
 All notable changes to `@kepello/nodegraph-domain-model`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.6.0] — 2026-05-19
+
+Bug fix — `recoverDomainModel` now enforces kind-exclusivity: an element classified as an entity is NOT also a value-object or a domain-service. Closes Fathom row 5.0.32. TDD-driven.
+
+### Changed
+
+- `recoverDomainModel` adds an entity-wins precedence pass after detection. Builds the set of `realizedByElementIds` across all detected entities; filters `detectValueObjects` and `detectDomainServices` output to drop concepts whose `realizedByElementIds` overlap the entity set. Aggregate-root and bounded-context are unaffected (aggregate-root shares its anchor entity by design; bounded-context is cluster-scoped and intentionally overlaps with per-element concepts).
+- `rawCountsByKind` continues to report **raw** (pre-precedence) counts per kind, so consumers can observe how many VO/domain-service collisions were resolved.
+
+### Why
+
+Round-6 pilot F7: three elements (`node`, `codeelementref`, `patterninstance`) classified as BOTH entity AND value-object simultaneously. Root cause: a TS interface with ≥ 3 fields, 0 methods, AND ≥ 1 implementor qualifies as entity (path 2 — entity-shape) AND value-object (path 2 — pure shape) under the independent per-detector rules. Each detector's internal `seenIds` deduped within itself but didn't coordinate across detectors. Consumers querying by `conceptKind=entity` AND by `conceptKind=value-object` received the same elements twice — implementing the precedence client-side wasn't reasonable. DDD precedence: entity > value-object, entity > domain-service.
+
+### Tests
+
+- 1 new regression test in `recovery.test.ts` — pins the exclusivity invariant via a TS-interface fixture that fires both detectors pre-fix and asserts: (a) the element appears under exactly one concept post-fix; (b) the winning kind is `entity`; (c) no element appears under two `ConceptKinds` across the whole result (excluding `bounded-context` and `aggregate-root` per design).
+- 35/35 tests pass.
+
 ## [0.5.1] — 2026-05-18
 
 Patch — `isFixturePath` now consults `DomainElement.artifactId` (full file path) first, falling back to `id` when absent. `DomainElement` gains optional `artifactId` field. Closes a 5.0.26 (b) follow-up: in real runs, callers pass substrate UUIDs as `id` (not natural-keys), so the prior path-pattern check never matched. With `artifactId` populated by fathom-cli's runner, fixture-pathed elements are now correctly rejected.

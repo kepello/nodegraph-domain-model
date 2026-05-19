@@ -77,6 +77,67 @@ test("recoverDomainModel — rawCountsByKind reports per-kind raw counts", () =>
   assert.equal(result.rawCountsByKind.get("value-object"), 1);
 });
 
+test("recoverDomainModel — kind exclusivity: no element appears under two ConceptKinds (Fathom 5.0.32)", () => {
+  // Round-6 pilot F7: `node`, `codeelementref`, `patterninstance` classified
+  // as BOTH entity AND value-object. Root cause: TS interface with ≥3 fields,
+  // 0 methods, ≥1 implementor qualifies as entity (path 2) AND value-object
+  // (path 2 — pure shape) simultaneously. The detectors fire independently;
+  // no precedence at the recovery layer.
+  //
+  // Invariant: each realizedBy elementId appears in at most one concept's
+  // realizedByElementIds across the full set of returned concepts.
+  // Entity wins on collision (entity > value-object precedence per DDD).
+  const ctx: DomainContext = {
+    ...emptyContext(),
+    elements: [
+      { id: "Node", name: "Node", kind: "interface" },
+      { id: "Node.id", name: "id", kind: "field" },
+      { id: "Node.kind", name: "kind", kind: "field" },
+      { id: "Node.metadata", name: "metadata", kind: "field" },
+      { id: "AnalysisNode", name: "AnalysisNode", kind: "class" },
+    ],
+    childrenOf: new Map([["Node", ["Node.id", "Node.kind", "Node.metadata"]]]),
+    inheritsEdges: new Map([["AnalysisNode", ["Node"]]]),
+  };
+  const result = recoverDomainModel({ context: ctx });
+  // Same element `Node` qualifies for BOTH entity (3 fields + implementor)
+  // and value-object (≥2 fields, 0 methods). Without precedence, it fires
+  // twice — this test asserts the post-fix invariant.
+  const node = result.concepts.filter((c) =>
+    c.realizedByElementIds.includes("Node"),
+  );
+  assert.equal(
+    node.length,
+    1,
+    `Node appears under ${node.length} concepts: ${node.map((c) => c.conceptKind).join(", ")}`,
+  );
+  assert.equal(node[0].conceptKind, "entity");
+
+  // General invariant: each elementId appears in at most one concept's
+  // realizedByElementIds across the whole result.
+  const elementToKinds = new Map<string, Set<string>>();
+  for (const c of result.concepts) {
+    if (c.conceptKind === "bounded-context" || c.conceptKind === "aggregate-root") {
+      // bounded-context realizedBy is cluster-wide and intentionally overlaps
+      // with per-element concepts (it groups them); aggregate-root realizedBy
+      // points to its anchor entity which legitimately also appears as the
+      // entity concept's realizedBy.
+      continue;
+    }
+    for (const id of c.realizedByElementIds) {
+      if (!elementToKinds.has(id)) elementToKinds.set(id, new Set());
+      elementToKinds.get(id)!.add(c.conceptKind);
+    }
+  }
+  for (const [id, kinds] of elementToKinds) {
+    assert.equal(
+      kinds.size,
+      1,
+      `element ${id} appears under multiple ConceptKinds: ${[...kinds].join(", ")}`,
+    );
+  }
+});
+
 test("recoverDomainModel — output sorted by descending confidence", () => {
   // Construct a context where two concepts get different confidence levels.
   const ctx: DomainContext = {

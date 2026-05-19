@@ -45,15 +45,32 @@ export function recoverDomainModel(
 
   const entities = detectEntities(input.context);
   const aggregateRoots = detectAggregateRoots(input.context, entities);
-  const valueObjects = detectValueObjects(input.context);
-  const domainServices = detectDomainServices(input.context);
+  const valueObjectsRaw = detectValueObjects(input.context);
+  const domainServicesRaw = detectDomainServices(input.context);
   const boundedContexts = detectBoundedContexts(input.context, { minClusterSize });
+
+  // Fathom row 5.0.32: kind-exclusivity precedence. An element classified
+  // as an entity is NOT also a value-object or a domain-service. The
+  // detectors fire independently; precedence belongs at the composite
+  // layer. DDD precedence: entity > value-object, entity > domain-service.
+  // Aggregate-root is permitted to share an element with the entity it
+  // anchors (the aggregate-root concept is an entity-with-extra-role).
+  const entityElementIds = new Set<string>();
+  for (const e of entities) {
+    for (const id of e.realizedByElementIds) entityElementIds.add(id);
+  }
+  const valueObjects = valueObjectsRaw.filter(
+    (vo) => !vo.realizedByElementIds.some((id) => entityElementIds.has(id)),
+  );
+  const domainServices = domainServicesRaw.filter(
+    (ds) => !ds.realizedByElementIds.some((id) => entityElementIds.has(id)),
+  );
 
   const rawCountsByKind = new Map<string, number>([
     ["entity", entities.length],
     ["aggregate-root", aggregateRoots.length],
-    ["value-object", valueObjects.length],
-    ["domain-service", domainServices.length],
+    ["value-object", valueObjectsRaw.length],
+    ["domain-service", domainServicesRaw.length],
     ["bounded-context", boundedContexts.length],
   ]);
 
