@@ -11,6 +11,13 @@ export interface DomainElement {
   /** Structural kind from the wire: `class`, `interface`, `method`, `field`, `struct`, etc. */
   kind: string;
   language?: string;
+  /**
+   * Source-file path. Used by `isFixturePath` in detectors to reject
+   * elements from `/tests/` / `/fixtures/` / etc. paths. Fathom row
+   * 5.0.26 (b). When the caller doesn't supply this, fixture-path
+   * exclusion silently skips (caller-opt-in pattern).
+   */
+  artifactId?: string;
 }
 
 export interface DomainEdge {

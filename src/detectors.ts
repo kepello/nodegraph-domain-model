@@ -77,25 +77,30 @@ function classes(ctx: DomainContext): DomainElement[] {
 const OPTION_BAG_SUFFIX_RE = /(Options|Input|Output|Metadata|Result|Args|Params|Config|Spec|State|Context|Snapshot|Summary|Counts|Counters|Stats|Report|Response|Request|Payload|Envelope|Update|Event|Message|Filter|Query|Mutation|Selector|Predicate|Builder|Factory)$/i;
 
 /**
- * Fathom row 5.0.26 (b): pattern-match the element id against
- * fixture/test path conventions. Mirrors fathom-cli's L3 exclusion
- * list (5.0.14 + 5.0.28 c) so DDD-recovery detectors don't classify
- * test fixtures as domain concepts. Round-5 pilot F9 surfaced
- * `app` + `crosslangfixturestests` (both C# conformance fixtures)
- * misidentified as domain-services; F10 surfaced `halsteadhelpers`
- * (test helper) as the only "entity."
+ * Fathom row 5.0.26 (b): pattern-match the element's source path
+ * against fixture/test path conventions. Mirrors fathom-cli's L3
+ * exclusion list (5.0.14 + 5.0.28 c) so DDD-recovery detectors don't
+ * classify test fixtures as domain concepts. Round-5 pilot F9
+ * surfaced `app` + `crosslangfixturestests` (both C# conformance
+ * fixtures) misidentified as domain-services; F10 surfaced
+ * `halsteadhelpers` (test helper) as the only "entity."
  *
- * Path patterns operate on the element id which embeds the path
- * (TS uses `:` separators, .NET uses `/` or `\`).
+ * Prefers `artifactId` (full file path) when present; falls back to
+ * `id` (natural-key path) when not — the natural-key form embeds the
+ * path with `:` separators (TS) or `/`/`\` (.NET / Windows). When
+ * neither is path-shaped (e.g., short test-fixture ids like
+ * `"halsteadhelpers"`), this returns false; callers that want
+ * fixture exclusion in those cases supply `artifactId` explicitly.
  */
-function isFixturePath(elementId: string): boolean {
+function isFixturePath(el: DomainElement): boolean {
+  const haystack = el.artifactId ?? el.id;
   return (
-    /[:\/\\]tests[:\/\\]/i.test(elementId) ||
-    /[:\/\\]fixtures[:\/\\]/i.test(elementId) ||
-    /[:\/\\]testdata[:\/\\]/i.test(elementId) ||
-    /[:\/\\]__tests__[:\/\\]/i.test(elementId) ||
-    /[:\/\\]__mocks__[:\/\\]/i.test(elementId) ||
-    /\.(test|spec)\.[a-z]+#/i.test(elementId)
+    /[:\/\\]tests?[:\/\\]/i.test(haystack) ||
+    /[:\/\\]fixtures[:\/\\]/i.test(haystack) ||
+    /[:\/\\]testdata[:\/\\]/i.test(haystack) ||
+    /[:\/\\]__tests__[:\/\\]/i.test(haystack) ||
+    /[:\/\\]__mocks__[:\/\\]/i.test(haystack) ||
+    /\.(test|spec)\.[a-z]+(#|$)/i.test(haystack)
   );
 }
 
@@ -138,7 +143,7 @@ export function detectEntities(ctx: DomainContext): ComputedConcept[] {
   for (const cls of classes(ctx)) {
     const stereo = ctx.classStereotypes.get(cls.id);
     if (stereo !== "entity") continue;
-    if (isFixturePath(cls.id)) continue;
+    if (isFixturePath(cls)) continue;
     if (OPTION_BAG_SUFFIX_RE.test(cls.name)) continue;
     const fields = fieldChildren(ctx, cls.id);
     let score = 0.7;
@@ -168,7 +173,7 @@ export function detectEntities(ctx: DomainContext): ComputedConcept[] {
   for (const el of ctx.elements) {
     if (el.kind !== "interface" && el.kind !== "type-alias") continue;
     if (seenIds.has(el.id)) continue;
-    if (isFixturePath(el.id)) continue;
+    if (isFixturePath(el)) continue;
     if (OPTION_BAG_SUFFIX_RE.test(el.name)) continue;
     const fields = fieldChildren(ctx, el.id);
     if (fields.length < 3) continue;
@@ -218,7 +223,7 @@ export function detectValueObjects(ctx: DomainContext): ComputedConcept[] {
   for (const cls of classes(ctx)) {
     const stereo = ctx.classStereotypes.get(cls.id);
     if (stereo !== "data-class") continue;
-    if (isFixturePath(cls.id)) continue;
+    if (isFixturePath(cls)) continue;
     if (OPTION_BAG_SUFFIX_RE.test(cls.name)) continue;
     const methods = methodChildren(ctx, cls.id);
     const hasMutator = methods.some(
@@ -249,7 +254,7 @@ export function detectValueObjects(ctx: DomainContext): ComputedConcept[] {
     if (!VALUE_SHAPE_KINDS.has(el.kind)) continue;
     if (CLASS_KINDS.has(el.kind)) continue; // already handled above
     if (seenIds.has(el.id)) continue;
-    if (isFixturePath(el.id)) continue;
+    if (isFixturePath(el)) continue;
     if (OPTION_BAG_SUFFIX_RE.test(el.name)) continue;
     const fields = fieldChildren(ctx, el.id);
     if (fields.length < 2) continue;
@@ -359,7 +364,7 @@ export function detectDomainServices(ctx: DomainContext): ComputedConcept[] {
     // Fathom 5.0.26 (b): reject fixture/test-pathed classes — round-5
     // F9 caught `app` + `crosslangfixturestests` (C# conformance
     // fixtures) being misidentified as domain-services.
-    if (isFixturePath(cls.id)) continue;
+    if (isFixturePath(cls)) continue;
     // Fathom 5.0.26 (a): reject option-bag-named classes.
     if (OPTION_BAG_SUFFIX_RE.test(cls.name)) continue;
     const fields = fieldChildren(ctx, cls.id);

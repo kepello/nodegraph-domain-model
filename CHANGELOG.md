@@ -2,6 +2,16 @@
 
 All notable changes to `@kepello/nodegraph-domain-model`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.5.1] — 2026-05-18
+
+Patch — `isFixturePath` now consults `DomainElement.artifactId` (full file path) first, falling back to `id` when absent. `DomainElement` gains optional `artifactId` field. Closes a 5.0.26 (b) follow-up: in real runs, callers pass substrate UUIDs as `id` (not natural-keys), so the prior path-pattern check never matched. With `artifactId` populated by fathom-cli's runner, fixture-pathed elements are now correctly rejected.
+
+### Changed
+
+- `DomainElement.artifactId?: string` — source-file path; opt-in field.
+- `isFixturePath(el: DomainElement)` (was `isFixturePath(elementId: string)`) — prefers `el.artifactId`, falls back to `el.id`. All call sites updated.
+- 34/34 tests pass; existing fixture-path test still uses `id` form (the natural-key path embeds `/tests/`-style segments and the fallback still matches).
+
 ## [0.5.0] — 2026-05-18
 
 DDD-recovery kind calibration — three coupled fixes addressing round-5 pilot F8 + F9 + F10. Closes Fathom row 5.0.26.
