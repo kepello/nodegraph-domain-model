@@ -2,6 +2,20 @@
 
 All notable changes to `@kepello/nodegraph-domain-model`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.5.0] — 2026-05-18
+
+DDD-recovery kind calibration — three coupled fixes addressing round-5 pilot F8 + F9 + F10. Closes Fathom row 5.0.26.
+
+### Added
+
+- **`OPTION_BAG_SUFFIX_RE`** — rejects elements whose name ends in `Options` / `Input` / `Output` / `Metadata` / `Result` / `Args` / `Params` / `Config` / `Spec` / `State` / `Context` / `Snapshot` / `Summary` / `Counts` / `Counters` / `Stats` / `Report` / `Response` / `Request` / `Payload` / `Envelope` / `Update` / `Event` / `Message` / `Filter` / `Query` / `Mutation` / `Selector` / `Predicate` / `Builder` / `Factory`. Applied across `detectEntities` + `detectValueObjects` + `detectDomainServices`. Closes round-5 F8: 30+ option-bags were misclassified as value-objects.
+- **`isFixturePath`** — pattern-matches element id for `/tests/` / `/fixtures/` / `/testdata/` / `/__tests__/` / `/__mocks__/` / `.test.<ext>#` / `.spec.<ext>#`. Mirrors fathom-cli's L3-input filter (5.0.14 + 5.0.28 c). Applied across all four DDD detectors. Closes round-5 F9: `app` + `crosslangfixturestests` (C# conformance fixtures) no longer mis-identified as domain-services; `halsteadhelpers` (test helper) no longer mis-identified as entity.
+- **TS interface-entity path** (`detectEntities` path 2) — fires on `interface` / `type-alias` with ≥ 3 field-shaped properties AND (≥ 1 implementor OR method children). Distinguishes "structurally-typed entity" (has shape + implementors) from "pure value shape" (which stays as value-object). Closes round-5 F10: TS workspaces previously recovered 0 entities because the rule cascade short-circuited interfaces to `interface` stereotype before reaching the entity rule.
+
+### Tests
+
+- 34/34 tests pass; 4 new regression tests (option-bag rejection, fixture-path rejection, TS interface-entity fires, pure-shape interface stays VO).
+
 ## [0.4.0] — 2026-05-18
 
 Fix — `detectValueObjects` adds a second detection path for TS-style interface/type-alias value objects. Closes Fathom row 5.0.17 (a).

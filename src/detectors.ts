@@ -67,6 +67,38 @@ function classes(ctx: DomainContext): DomainElement[] {
   return ctx.elements.filter((e) => CLASS_KINDS.has(e.kind));
 }
 
+/**
+ * Fathom row 5.0.26 (a): option-bag suffixes that indicate
+ * configuration / input / output parameter shapes rather than DDD
+ * value objects. A `MoneyOptions` is not a value object; it's an
+ * argument bag. Round-5 pilot F8 surfaced 30+ such bags being
+ * classified as value-objects in one cluster.
+ */
+const OPTION_BAG_SUFFIX_RE = /(Options|Input|Output|Metadata|Result|Args|Params|Config|Spec|State|Context|Snapshot|Summary|Counts|Counters|Stats|Report|Response|Request|Payload|Envelope|Update|Event|Message|Filter|Query|Mutation|Selector|Predicate|Builder|Factory)$/i;
+
+/**
+ * Fathom row 5.0.26 (b): pattern-match the element id against
+ * fixture/test path conventions. Mirrors fathom-cli's L3 exclusion
+ * list (5.0.14 + 5.0.28 c) so DDD-recovery detectors don't classify
+ * test fixtures as domain concepts. Round-5 pilot F9 surfaced
+ * `app` + `crosslangfixturestests` (both C# conformance fixtures)
+ * misidentified as domain-services; F10 surfaced `halsteadhelpers`
+ * (test helper) as the only "entity."
+ *
+ * Path patterns operate on the element id which embeds the path
+ * (TS uses `:` separators, .NET uses `/` or `\`).
+ */
+function isFixturePath(elementId: string): boolean {
+  return (
+    /[:\/\\]tests[:\/\\]/i.test(elementId) ||
+    /[:\/\\]fixtures[:\/\\]/i.test(elementId) ||
+    /[:\/\\]testdata[:\/\\]/i.test(elementId) ||
+    /[:\/\\]__tests__[:\/\\]/i.test(elementId) ||
+    /[:\/\\]__mocks__[:\/\\]/i.test(elementId) ||
+    /\.(test|spec)\.[a-z]+#/i.test(elementId)
+  );
+}
+
 function methodChildren(ctx: DomainContext, classId: string): DomainElement[] {
   const ids = ctx.childrenOf.get(classId) ?? [];
   return ids
@@ -82,15 +114,32 @@ function fieldChildren(ctx: DomainContext, classId: string): DomainElement[] {
 }
 
 /**
- * Entity — class with L1 classStereotype `entity`. Confidence 0.85
- * when stereotype matches exactly; supplements with field-count signal
- * (entities typically carry ≥ 1 field).
+ * Entity — two paths:
+ *
+ *  - Classic: class / struct with L1 classStereotype `entity`.
+ *  - TS / interface-shaped (Fathom 5.0.26 c): interface or type-alias
+ *    with ≥ 3 field-shaped properties AND ≥ 1 implementor (inbound
+ *    `extends`/`implements` edge) AND the name doesn't look like an
+ *    option-bag suffix. The implementor signal distinguishes
+ *    "structurally-typed entity" from "pure data shape" (which goes
+ *    to value-object).
+ *
+ * Both paths reject test/fixture-pathed elements (5.0.26 b) and
+ * option-bag-named elements (5.0.26 a).
+ *
+ * Confidence supplemented by field-count (entities typically carry
+ * ≥ 1 field; ≥ 3 is more confidently entity-shaped).
  */
 export function detectEntities(ctx: DomainContext): ComputedConcept[] {
   const out: ComputedConcept[] = [];
+  const seenIds = new Set<string>();
+
+  // Path 1 — classic class-stereotype entity.
   for (const cls of classes(ctx)) {
     const stereo = ctx.classStereotypes.get(cls.id);
     if (stereo !== "entity") continue;
+    if (isFixturePath(cls.id)) continue;
+    if (OPTION_BAG_SUFFIX_RE.test(cls.name)) continue;
     const fields = fieldChildren(ctx, cls.id);
     let score = 0.7;
     if (fields.length >= 1) score += 0.1;
@@ -104,7 +153,45 @@ export function detectEntities(ctx: DomainContext): ComputedConcept[] {
       confidenceScore: score,
       realizedByElementIds: [cls.id],
     });
+    seenIds.add(cls.id);
   }
+
+  // Path 2 — TS interface-shaped entity. Fathom row 5.0.26 (c).
+  // Build inverse of inheritsEdges: target → sources that extend/implement it.
+  const implementorsByTarget = new Map<string, number>();
+  for (const [src, parents] of ctx.inheritsEdges) {
+    void src;
+    for (const target of parents) {
+      implementorsByTarget.set(target, (implementorsByTarget.get(target) ?? 0) + 1);
+    }
+  }
+  for (const el of ctx.elements) {
+    if (el.kind !== "interface" && el.kind !== "type-alias") continue;
+    if (seenIds.has(el.id)) continue;
+    if (isFixturePath(el.id)) continue;
+    if (OPTION_BAG_SUFFIX_RE.test(el.name)) continue;
+    const fields = fieldChildren(ctx, el.id);
+    if (fields.length < 3) continue;
+    const methods = methodChildren(ctx, el.id);
+    // Entity-shape: has methods OR has implementors. Pure-data
+    // interfaces (no methods, no implementors) go to value-object.
+    const implementors = implementorsByTarget.get(el.id) ?? 0;
+    const hasEntityShape = methods.length > 0 || implementors > 0;
+    if (!hasEntityShape) continue;
+    let score = 0.6;
+    if (fields.length >= 5) score += 0.1;
+    if (implementors >= 2) score += 0.05;
+    out.push({
+      conceptKind: "entity",
+      name: el.name,
+      clusterId: ctx.clusterByElement.get(el.id),
+      language: el.language,
+      confidenceScore: score,
+      realizedByElementIds: [el.id],
+    });
+    seenIds.add(el.id);
+  }
+
   return out;
 }
 
@@ -131,6 +218,8 @@ export function detectValueObjects(ctx: DomainContext): ComputedConcept[] {
   for (const cls of classes(ctx)) {
     const stereo = ctx.classStereotypes.get(cls.id);
     if (stereo !== "data-class") continue;
+    if (isFixturePath(cls.id)) continue;
+    if (OPTION_BAG_SUFFIX_RE.test(cls.name)) continue;
     const methods = methodChildren(ctx, cls.id);
     const hasMutator = methods.some(
       (m) => ctx.methodStereotypes.get(m.id) === "mutator-shaped",
@@ -152,10 +241,16 @@ export function detectValueObjects(ctx: DomainContext): ComputedConcept[] {
   }
 
   // Path 2 — interface / type-alias shape (Fathom 5.0.17).
+  // Fathom 5.0.26 (a): reject option-bag names — `*Options`,
+  // `*Input`, `*Metadata`, etc. are configuration shapes, not DDD
+  // value objects.
+  // Fathom 5.0.26 (b): reject fixture/test-path elements.
   for (const el of ctx.elements) {
     if (!VALUE_SHAPE_KINDS.has(el.kind)) continue;
     if (CLASS_KINDS.has(el.kind)) continue; // already handled above
     if (seenIds.has(el.id)) continue;
+    if (isFixturePath(el.id)) continue;
+    if (OPTION_BAG_SUFFIX_RE.test(el.name)) continue;
     const fields = fieldChildren(ctx, el.id);
     if (fields.length < 2) continue;
     const methods = methodChildren(ctx, el.id);
@@ -261,6 +356,12 @@ export function detectDomainServices(ctx: DomainContext): ComputedConcept[] {
   for (const cls of classes(ctx)) {
     const stereo = ctx.classStereotypes.get(cls.id);
     if (stereo !== "controller" && stereo !== "command") continue;
+    // Fathom 5.0.26 (b): reject fixture/test-pathed classes — round-5
+    // F9 caught `app` + `crosslangfixturestests` (C# conformance
+    // fixtures) being misidentified as domain-services.
+    if (isFixturePath(cls.id)) continue;
+    // Fathom 5.0.26 (a): reject option-bag-named classes.
+    if (OPTION_BAG_SUFFIX_RE.test(cls.name)) continue;
     const fields = fieldChildren(ctx, cls.id);
     if (fields.length > 2) continue;
     const methods = methodChildren(ctx, cls.id);

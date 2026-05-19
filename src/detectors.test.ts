@@ -147,6 +147,82 @@ test("detectValueObjects — doesn't fire on TS interface with method children",
   assert.equal(detectValueObjects(ctx).length, 0);
 });
 
+test("detectValueObjects — rejects option-bag suffixes (Fathom 5.0.26 a)", () => {
+  // Round-5 F8: 30+ option-bags classified as VO. Names ending in
+  // Options / Input / Metadata / Result etc. are configuration shapes,
+  // not DDD value objects.
+  const ctx = buildContext({
+    elements: [
+      { id: "ComposeOptions", name: "ComposeOptions", kind: "interface" },
+      { id: "ComposeOptions.graph", name: "graph", kind: "field" },
+      { id: "ComposeOptions.config", name: "config", kind: "field" },
+      { id: "AnalyzeResult", name: "AnalyzeResult", kind: "interface" },
+      { id: "AnalyzeResult.queries", name: "queries", kind: "field" },
+      { id: "AnalyzeResult.graph", name: "graph", kind: "field" },
+    ],
+    childrenOf: new Map([
+      ["ComposeOptions", ["ComposeOptions.graph", "ComposeOptions.config"]],
+      ["AnalyzeResult", ["AnalyzeResult.queries", "AnalyzeResult.graph"]],
+    ]),
+  });
+  // Neither should fire — both are option-bag-named.
+  assert.equal(detectValueObjects(ctx).length, 0);
+});
+
+test("detectValueObjects — rejects fixture-pathed elements (Fathom 5.0.26 b)", () => {
+  // Round-5 F9 saw `halsteadhelpers` (a test helper) classified as
+  // entity; same family of false-positives would hit VO. Path-based
+  // exclusion matches /tests/, /fixtures/, etc.
+  const ctx = buildContext({
+    elements: [
+      { id: ":Users:dev:proj:src:tests:money.ts#Money", name: "Money", kind: "interface" },
+      { id: ":Users:dev:proj:src:tests:money.ts#Money.amount", name: "amount", kind: "field" },
+      { id: ":Users:dev:proj:src:tests:money.ts#Money.currency", name: "currency", kind: "field" },
+    ],
+    childrenOf: new Map([
+      [":Users:dev:proj:src:tests:money.ts#Money",
+        [":Users:dev:proj:src:tests:money.ts#Money.amount",
+         ":Users:dev:proj:src:tests:money.ts#Money.currency"]],
+    ]),
+  });
+  assert.equal(detectValueObjects(ctx).length, 0);
+});
+
+test("detectEntities — fires on TS interface with ≥3 fields + implementor (Fathom 5.0.26 c)", () => {
+  // TS expresses many entity shapes as interfaces with implementations.
+  // An interface with substantive shape AND ≥1 implementor counts as
+  // entity-shape (distinct from value-object's pure shape).
+  const ctx = buildContext({
+    elements: [
+      { id: "User", name: "User", kind: "interface" },
+      { id: "User.id", name: "id", kind: "field" },
+      { id: "User.name", name: "name", kind: "field" },
+      { id: "User.email", name: "email", kind: "field" },
+      { id: "UserImpl", name: "UserImpl", kind: "class" },
+    ],
+    childrenOf: new Map([["User", ["User.id", "User.name", "User.email"]]]),
+    inheritsEdges: new Map([["UserImpl", ["User"]]]),
+  });
+  const entities = detectEntities(ctx);
+  const user = entities.find((e) => e.name === "User");
+  assert.ok(user !== undefined, "User interface with 3 fields + implementor should be entity");
+});
+
+test("detectEntities — does NOT fire on shape-only interface without implementor", () => {
+  // Pure data shape — should go to value-object, not entity.
+  const ctx = buildContext({
+    elements: [
+      { id: "Point", name: "Point", kind: "interface" },
+      { id: "Point.x", name: "x", kind: "field" },
+      { id: "Point.y", name: "y", kind: "field" },
+      { id: "Point.z", name: "z", kind: "field" },
+    ],
+    childrenOf: new Map([["Point", ["Point.x", "Point.y", "Point.z"]]]),
+  });
+  const entities = detectEntities(ctx);
+  assert.equal(entities.find((e) => e.name === "Point"), undefined);
+});
+
 // --- detectAggregateRoots -------------------------------------------------
 
 test("detectAggregateRoots — fires on entity with the most inbound refs in cluster", () => {
