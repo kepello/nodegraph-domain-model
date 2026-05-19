@@ -208,6 +208,84 @@ test("detectEntities — fires on TS interface with ≥3 fields + implementor (F
   assert.ok(user !== undefined, "User interface with 3 fields + implementor should be entity");
 });
 
+test("detectEntities — fires on 'large-class' stereotype with entity shape (Fathom 5.0.36)", () => {
+  // Round-6 pilot F12: graphlayerimpl (~936 LOC, 12 fields, dozens of
+  // methods, mutable state + behavior) is structurally an entity but
+  // classifies as `large-class` (anti-pattern stereotype, rule 2 in the
+  // stereotype rule cascade fires before rule 5 entity). With the
+  // strict `stereo !== "entity"` gate, detectEntities silently skips
+  // the canonical entity case — the workspace's largest, most
+  // stateful, most-mutated class.
+  //
+  // Fix: detectEntities accepts `large-class` when entity-shape holds
+  // (≥3 fields AND ≥3 method children). Large-classes ARE entities,
+  // just oversized — surfacing them as entity does not contradict
+  // their anti-pattern classification (detection layer + L6 patterns
+  // continue to flag them as god-class for ratings + violations).
+  const ctx = buildContext({
+    elements: [
+      { id: "BigEntity", name: "BigEntity", kind: "class" },
+      { id: "BigEntity.id", name: "id", kind: "field" },
+      { id: "BigEntity.state", name: "state", kind: "field" },
+      { id: "BigEntity.history", name: "history", kind: "field" },
+      { id: "BigEntity.update", name: "update", kind: "method" },
+      { id: "BigEntity.tombstone", name: "tombstone", kind: "method" },
+      { id: "BigEntity.recordEvent", name: "recordEvent", kind: "method" },
+    ],
+    classStereotypes: new Map([["BigEntity", "large-class"]]),
+    childrenOf: new Map([
+      [
+        "BigEntity",
+        [
+          "BigEntity.id",
+          "BigEntity.state",
+          "BigEntity.history",
+          "BigEntity.update",
+          "BigEntity.tombstone",
+          "BigEntity.recordEvent",
+        ],
+      ],
+    ]),
+  });
+  const entities = detectEntities(ctx);
+  const big = entities.find((e) => e.name === "BigEntity");
+  assert.ok(big !== undefined, "large-class with entity-shape should fire as entity");
+  assert.equal(big.conceptKind, "entity");
+});
+
+test("detectEntities — does NOT fire on 'large-class' lacking entity shape (Fathom 5.0.36)", () => {
+  // A large-class with too few fields (< 3) doesn't have entity shape —
+  // it's an oversized procedural module, not a domain entity. Stays
+  // unclassified at L7b. Same threshold as the existing entity rule.
+  const ctx = buildContext({
+    elements: [
+      { id: "Procedural", name: "Procedural", kind: "class" },
+      { id: "Procedural.config", name: "config", kind: "field" },
+      { id: "Procedural.doA", name: "doA", kind: "method" },
+      { id: "Procedural.doB", name: "doB", kind: "method" },
+      { id: "Procedural.doC", name: "doC", kind: "method" },
+      { id: "Procedural.doD", name: "doD", kind: "method" },
+    ],
+    classStereotypes: new Map([["Procedural", "large-class"]]),
+    childrenOf: new Map([
+      [
+        "Procedural",
+        [
+          "Procedural.config",
+          "Procedural.doA",
+          "Procedural.doB",
+          "Procedural.doC",
+          "Procedural.doD",
+        ],
+      ],
+    ]),
+  });
+  assert.equal(
+    detectEntities(ctx).find((e) => e.name === "Procedural"),
+    undefined,
+  );
+});
+
 test("detectEntities — does NOT fire on shape-only interface without implementor", () => {
   // Pure data shape — should go to value-object, not entity.
   const ctx = buildContext({

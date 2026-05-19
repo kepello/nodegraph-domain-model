@@ -139,14 +139,34 @@ export function detectEntities(ctx: DomainContext): ComputedConcept[] {
   const out: ComputedConcept[] = [];
   const seenIds = new Set<string>();
 
-  // Path 1 — classic class-stereotype entity.
+  // Path 1 — classic class-stereotype entity OR large-class with
+  // entity-shape (Fathom row 5.0.36). The L1 stereotype rule cascade
+  // assigns `large-class` BEFORE `entity` (anti-pattern signal wins on
+  // structural overload — methodCount > 20 or loc > 500). A class can
+  // be both a god-class AND an entity: the anti-pattern stereotype
+  // describes WHAT IT IS (oversized), the conceptKind describes WHAT IT
+  // MODELS (a mutable domain object). Surfacing large-class as entity
+  // doesn't suppress the anti-pattern signal — detection + ratings +
+  // L6 patterns continue to flag the god-class separately.
+  //
+  // Entity-shape predicate (matches the L1 entity rule's structural
+  // floor): ≥ 3 fields AND ≥ 3 method children. Confidence is dropped
+  // by 0.1 for the large-class path to encode the secondary-match
+  // signal — consumers can rank pure entities above god-class entities.
   for (const cls of classes(ctx)) {
     const stereo = ctx.classStereotypes.get(cls.id);
-    if (stereo !== "entity") continue;
+    if (stereo !== "entity" && stereo !== "large-class") continue;
     if (isFixturePath(cls)) continue;
     if (OPTION_BAG_SUFFIX_RE.test(cls.name)) continue;
     const fields = fieldChildren(ctx, cls.id);
-    let score = 0.7;
+    const methods = methodChildren(ctx, cls.id);
+    // Entity-shape gate (applied to both stereotypes — `entity` keeps
+    // its own ≥1-field signal via the score-boost below; the gate here
+    // only filters large-classes that lack structural-entity shape).
+    if (stereo === "large-class" && (fields.length < 3 || methods.length < 3)) {
+      continue;
+    }
+    let score = stereo === "large-class" ? 0.6 : 0.7;
     if (fields.length >= 1) score += 0.1;
     if (fields.length >= 3) score += 0.05;
     const clusterId = ctx.clusterByElement.get(cls.id);

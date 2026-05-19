@@ -2,6 +2,23 @@
 
 All notable changes to `@kepello/nodegraph-domain-model`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.7.0] — 2026-05-19
+
+Adds — `detectEntities` accepts the `large-class` L1 stereotype when entity-shape holds (≥3 fields + ≥3 method children). Closes Fathom row 5.0.36. TDD-driven.
+
+### Changed
+
+- `detectEntities` path 1: the gate now reads `stereo === "entity" || stereo === "large-class"`. For `large-class`, an additional entity-shape filter (≥3 fields AND ≥3 method children) prevents oversized procedural modules from firing as domain entities. Confidence is 0.1 lower for the large-class path (base 0.6 vs 0.7) so consumers can rank pure entities above god-class entities. The kind-exclusivity precedence shipped in 0.6.0 (Fathom 5.0.32) ensures these surface as entity only, not double-counted as VOs.
+
+### Why
+
+Round-6 pilot F12: the workspace's largest BC cluster contains `graphlayerimpl` — a 936-LOC class with 12 fields and dozens of methods, the canonical "mutable state + behavior" entity shape. But `concepts_in_context` surfaces 8 VOs and 0 entities for that cluster. Root cause: the L1 stereotype rule cascade assigns `large-class` (rule 2) BEFORE the `entity` rule (rule 5), so structurally-entity-shaped classes that hit the methodCount > 20 OR loc > 500 thresholds get the anti-pattern stereotype and silently skip L7b entity emission. A class can be both a god-class AND an entity — the anti-pattern describes what it IS (oversized), the conceptKind describes what it MODELS (a domain object). The L6 god-class pattern + rating-side vetos continue to flag the anti-pattern separately; this change only adds the missing L7b emission.
+
+### Tests
+
+- 2 new regression tests: `large-class` with entity-shape (3 fields + 3 methods) fires as entity; `large-class` without entity-shape (1 field) does NOT fire.
+- 37/37 tests pass.
+
 ## [0.6.0] — 2026-05-19
 
 Bug fix — `recoverDomainModel` now enforces kind-exclusivity: an element classified as an entity is NOT also a value-object or a domain-service. Closes Fathom row 5.0.32. TDD-driven.
