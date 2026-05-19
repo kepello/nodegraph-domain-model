@@ -2,6 +2,31 @@
 
 All notable changes to `@kepello/nodegraph-domain-model`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.10.0] — 2026-05-19
+
+Adds — helper-module name-suffix exclusion across all DDD recovery detectors. Closes Fathom row 5.0.43 (round-8 F6 dotnet partial-class helper leak into bounded-contexts).
+
+### Added
+
+- **`HELPER_MODULE_SUFFIX_RE` + `isHelperModule(el)` (local)** — name-suffix predicate matching `/Helpers?$/i` on `DomainElement.name`. Mirrors the `isHelperModuleName` predicate in `@kepello/nodegraph-analysis` (kept package-local to avoid a peer-dep, parallel to the local `isFixturePath` copy).
+- **Helper-module skips** in DDD detectors:
+  - `detectEntities` paths 1 + 2: helper-module rejected (alongside fixture-path + option-bag suffix).
+  - `detectValueObjects` paths 1 + 2: helper-module rejected.
+  - `detectDomainServices`: helper-module rejected.
+  - `detectBoundedContexts`: cluster skipped when ALL class-kind realizedBy elements are helper-modules. The check is **dominance-based** (all class-kind members must be helper-suffixed) — mixed clusters with at least one non-helper class fall through to normal bounded-context rules.
+
+### Why
+
+Round-8 F6 substrate audit observed `cluster-halsteadhelpers`, `cluster-cognitivehelpers/state`, `cluster-intraclasshelpers`, `cluster-projectfilehelpers` surface as bounded-context concepts in the live Fathom substrate (csharp, no llmName). These are code-organization partial classes in `nodegraph-analyzer-dotnet`'s Roslyn host, not domain concepts. Same exclusion shape as the 5.0.26(b) fixture-path filter but name-suffix-based.
+
+### Tests
+
+- 44/44 (now 49 with new helper-module fixtures) tests pass. New cases: entity / value-object / service rejection; bounded-context skip when all class-kind members are helper-suffixed; bounded-context fires when at least one non-helper class is present (negative-of-the-negative).
+
+## [0.9.0] — 2026-05-19
+
+Adds — capture domain-scoped mutator at `registerOverlay` time. Closes Fathom row 5.0.42 (nodegraph-core@2.0.0 GraphReader/GraphMutator split adoption).
+
 ## [0.8.0] — 2026-05-19
 
 Adds — `DomainModelOverlay.setEnrichment(conceptId, llmEnrichment)` + `DomainConceptMetadata.llmEnrichment?` field. Fixes latent bug in `renameConcept`. Closes Fathom row 5.0.39 (concept half). TDD-driven.

@@ -77,6 +77,27 @@ function classes(ctx: DomainContext): DomainElement[] {
 const OPTION_BAG_SUFFIX_RE = /(Options|Input|Output|Metadata|Result|Args|Params|Config|Spec|State|Context|Snapshot|Summary|Counts|Counters|Stats|Report|Response|Request|Payload|Envelope|Update|Event|Message|Filter|Query|Mutation|Selector|Predicate|Builder|Factory)$/i;
 
 /**
+ * Fathom row 5.0.43 (round-8 F6): helper-module name suffix. Classes
+ * named `*Helpers` or `*Helper` group loosely-related utility methods
+ * and don't model a domain concept. Round-8 F6 surfaced `cognitivehelpers`,
+ * `halsteadhelpers`, `intraclasshelpers`, `projectfilehelpers`, etc. as
+ * bounded-contexts (false signal) and `cognitivehelpers` /
+ * `analysishelpers` in `worst_rated` (Cohesion critical-veto fires on
+ * disjoint-field-access, structurally correct but operator-misleading).
+ *
+ * Mirrors the L1 `helper-module` class stereotype in nodegraph-analysis
+ * (the canonical signal). This local check is the L7b DDD-recovery
+ * mirror of the same rule — kept package-local to avoid a peer-dep on
+ * nodegraph-analysis (parallel to `isFixturePath` above, which mirrors
+ * `isFixturePathString` for the same reason).
+ */
+const HELPER_MODULE_SUFFIX_RE = /Helpers?$/i;
+
+function isHelperModule(el: DomainElement): boolean {
+  return HELPER_MODULE_SUFFIX_RE.test(el.name);
+}
+
+/**
  * Fathom row 5.0.26 (b): pattern-match the element's source path
  * against fixture/test path conventions. Mirrors fathom-cli's L3
  * exclusion list (5.0.14 + 5.0.28 c) so DDD-recovery detectors don't
@@ -157,6 +178,7 @@ export function detectEntities(ctx: DomainContext): ComputedConcept[] {
     const stereo = ctx.classStereotypes.get(cls.id);
     if (stereo !== "entity" && stereo !== "large-class") continue;
     if (isFixturePath(cls)) continue;
+    if (isHelperModule(cls)) continue; // Fathom 5.0.43 / round-8 F6
     if (OPTION_BAG_SUFFIX_RE.test(cls.name)) continue;
     const fields = fieldChildren(ctx, cls.id);
     const methods = methodChildren(ctx, cls.id);
@@ -194,6 +216,7 @@ export function detectEntities(ctx: DomainContext): ComputedConcept[] {
     if (el.kind !== "interface" && el.kind !== "type-alias") continue;
     if (seenIds.has(el.id)) continue;
     if (isFixturePath(el)) continue;
+    if (isHelperModule(el)) continue; // Fathom 5.0.43 / round-8 F6
     if (OPTION_BAG_SUFFIX_RE.test(el.name)) continue;
     const fields = fieldChildren(ctx, el.id);
     if (fields.length < 3) continue;
@@ -244,6 +267,7 @@ export function detectValueObjects(ctx: DomainContext): ComputedConcept[] {
     const stereo = ctx.classStereotypes.get(cls.id);
     if (stereo !== "data-class") continue;
     if (isFixturePath(cls)) continue;
+    if (isHelperModule(cls)) continue; // Fathom 5.0.43 / round-8 F6
     if (OPTION_BAG_SUFFIX_RE.test(cls.name)) continue;
     const methods = methodChildren(ctx, cls.id);
     const hasMutator = methods.some(
@@ -275,6 +299,7 @@ export function detectValueObjects(ctx: DomainContext): ComputedConcept[] {
     if (CLASS_KINDS.has(el.kind)) continue; // already handled above
     if (seenIds.has(el.id)) continue;
     if (isFixturePath(el)) continue;
+    if (isHelperModule(el)) continue; // Fathom 5.0.43 / round-8 F6
     if (OPTION_BAG_SUFFIX_RE.test(el.name)) continue;
     const fields = fieldChildren(ctx, el.id);
     if (fields.length < 2) continue;
@@ -385,6 +410,8 @@ export function detectDomainServices(ctx: DomainContext): ComputedConcept[] {
     // F9 caught `app` + `crosslangfixturestests` (C# conformance
     // fixtures) being misidentified as domain-services.
     if (isFixturePath(cls)) continue;
+    // Fathom 5.0.43 / round-8 F6: reject helper-module name suffix.
+    if (isHelperModule(cls)) continue;
     // Fathom 5.0.26 (a): reject option-bag-named classes.
     if (OPTION_BAG_SUFFIX_RE.test(cls.name)) continue;
     const fields = fieldChildren(ctx, cls.id);
@@ -510,6 +537,23 @@ export function detectBoundedContexts(
     // bounded-context, not parameter/type-param noise.
     const realizedBy = members.filter((m) => REALIZED_BY_KINDS.has(m.kind));
     if (realizedBy.length === 0) continue;
+
+    // Fathom row 5.0.43 / round-8 F6: skip clusters whose class-kind
+    // realizedBy elements are ALL helper-modules (name suffix
+    // `Helpers?`). Round-8 F6 surfaced 4+ such clusters as
+    // bounded-contexts (e.g., `cluster-halsteadhelpers`,
+    // `cluster-cognitivehelpers/state`) — they're code-organization
+    // partials in the dotnet analyzer host, not domain concepts.
+    // Method/function/etc. realizedBy members are not gated on this
+    // (helper-module is class-only); the class-kind dominance is what
+    // signals "this cluster IS a helper module."
+    const classKindMembers = realizedBy.filter((m) => CLASS_KINDS.has(m.kind));
+    if (
+      classKindMembers.length > 0 &&
+      classKindMembers.every((m) => isHelperModule(m))
+    ) {
+      continue;
+    }
 
     out.push({
       conceptKind: "bounded-context",

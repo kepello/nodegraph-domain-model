@@ -517,3 +517,105 @@ test("detectBoundedContexts — options can loosen thresholds for permissive cal
   });
   assert.equal(out.length, 1);
 });
+
+// --- helper-module skips (Fathom 5.0.43 / round-8 F6) ---------------------
+
+test("detectEntities — rejects helper-module name suffix (Fathom 5.0.43 / round-8 F6)", () => {
+  // Round-8 F6: dotnet partial-class helpers `cognitivehelpers`,
+  // `halsteadhelpers`, `analysishelpers` etc. surface as entities
+  // when L1 stereotype lands on entity-like or large-class shape.
+  // Same exclusion shape as fixture-path (5.0.26 b) but name-suffix
+  // based instead of path based.
+  const ctx = buildContext({
+    elements: [
+      { id: "CognitiveHelpers", name: "CognitiveHelpers", kind: "class" },
+      { id: "CognitiveHelpers.f1", name: "f1", kind: "field" },
+      { id: "CognitiveHelpers.f2", name: "f2", kind: "field" },
+      { id: "CognitiveHelpers.f3", name: "f3", kind: "field" },
+      { id: "CognitiveHelpers.m1", name: "m1", kind: "method" },
+      { id: "CognitiveHelpers.m2", name: "m2", kind: "method" },
+      { id: "CognitiveHelpers.m3", name: "m3", kind: "method" },
+    ],
+    classStereotypes: new Map([["CognitiveHelpers", "entity"]]),
+    childrenOf: new Map([
+      ["CognitiveHelpers", [
+        "CognitiveHelpers.f1", "CognitiveHelpers.f2", "CognitiveHelpers.f3",
+        "CognitiveHelpers.m1", "CognitiveHelpers.m2", "CognitiveHelpers.m3",
+      ]],
+    ]),
+  });
+  assert.equal(detectEntities(ctx).length, 0);
+});
+
+test("detectValueObjects — rejects helper-module name suffix (Fathom 5.0.43 / round-8 F6)", () => {
+  const ctx = buildContext({
+    elements: [
+      { id: "StringHelpers", name: "StringHelpers", kind: "interface" },
+      { id: "StringHelpers.f1", name: "f1", kind: "field" },
+      { id: "StringHelpers.f2", name: "f2", kind: "field" },
+    ],
+    childrenOf: new Map([
+      ["StringHelpers", ["StringHelpers.f1", "StringHelpers.f2"]],
+    ]),
+  });
+  assert.equal(detectValueObjects(ctx).length, 0);
+});
+
+test("detectDomainServices — rejects helper-module name suffix (Fathom 5.0.43 / round-8 F6)", () => {
+  const ctx = buildContext({
+    elements: [
+      { id: "AnalysisHelpers", name: "AnalysisHelpers", kind: "class" },
+      { id: "AnalysisHelpers.m1", name: "m1", kind: "method" },
+    ],
+    classStereotypes: new Map([["AnalysisHelpers", "controller"]]),
+    childrenOf: new Map([["AnalysisHelpers", ["AnalysisHelpers.m1"]]]),
+  });
+  assert.equal(detectDomainServices(ctx).length, 0);
+});
+
+test("detectBoundedContexts — rejects cluster whose class-kind members are all helper-modules (Fathom 5.0.43 / round-8 F6)", () => {
+  // Round-8 F6: `cluster-halsteadhelpers`, `cluster-cognitivehelpers/state`
+  // etc. surface as bounded-contexts even though their realizedBy is
+  // dominated by helper-module partial classes. Skip when ALL class-kind
+  // realizedBy elements are helper-suffixed.
+  const ctx = buildContext({
+    elements: [
+      { id: "h1", name: "CognitiveHelpers", kind: "class" },
+      { id: "h2", name: "HalsteadHelpers", kind: "class" },
+      { id: "h3", name: "AnalysisHelpers", kind: "class" },
+      { id: "h4", name: "ScalarHelpers", kind: "class" },
+      { id: "h5", name: "IntraclassHelpers", kind: "class" },
+    ],
+    clusters: [{ clusterId: "dotnet-helpers", name: "cluster-dotnethelpers", memberCount: 5 }],
+    clusterByElement: new Map([
+      ["h1", "dotnet-helpers"], ["h2", "dotnet-helpers"], ["h3", "dotnet-helpers"],
+      ["h4", "dotnet-helpers"], ["h5", "dotnet-helpers"],
+    ]),
+  });
+  assert.equal(detectBoundedContexts(ctx).length, 0);
+});
+
+test("detectBoundedContexts — fires when at least one non-helper class is present (Fathom 5.0.43 / round-8 F6)", () => {
+  // Negative-of-the-negative: skip is "ALL class-kind members are
+  // helper-modules". When at least one non-helper class is present,
+  // the cluster passes through normal bounded-context rules.
+  const ctx = buildContext({
+    elements: [
+      { id: "h1", name: "CognitiveHelpers", kind: "class" },
+      { id: "h2", name: "HalsteadHelpers", kind: "class" },
+      { id: "u1", name: "AccountManager", kind: "class" },
+      { id: "u2", name: "BookkeepingService", kind: "class" },
+      { id: "u3", name: "LedgerEntry", kind: "class" },
+    ],
+    clusters: [{ clusterId: "mixed", name: "cluster-mixed", memberCount: 5 }],
+    clusterByElement: new Map([
+      ["h1", "mixed"], ["h2", "mixed"], ["u1", "mixed"], ["u2", "mixed"], ["u3", "mixed"],
+    ]),
+  });
+  // With looser thresholds since the fixture is tiny.
+  const out = detectBoundedContexts(ctx, {
+    minVocabularySize: 2,
+    minDistinctiveness: 0.1,
+  });
+  assert.equal(out.length, 1, "mixed cluster should fire — only ALL-helper clusters are skipped");
+});
