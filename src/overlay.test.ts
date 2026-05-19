@@ -103,6 +103,75 @@ test("renameConcept — updates displayName, preserves identity", () => {
   assert.equal(renamed.metadata.name, "User");
 });
 
+test("renameConcept — PRESERVES realizedBy edges through supersede (Fathom 5.0.39)", () => {
+  // Parallel to the clusters-overlay bug (5.0.39). `renameConcept`
+  // calls `graph.supersedeNode` to write the new displayName, which
+  // cascades the prior node's outgoing live edges to tombstoned —
+  // including all `realizedBy` / `partOfContext` / `relatedTo` edges.
+  // The current implementation does NOT re-emit those edges from the
+  // new node, so renaming a concept silently strips its membership.
+  //
+  // Invariant: after any overlay-method-driven supersede of a concept
+  // node, the same edge set must survive. The overlay owns the edge
+  // invariant; its OWN methods MUST honor it.
+  const graph = makeGraph();
+  const overlay = makeDomainModelOverlay(graph);
+  overlay.insertConcept({
+    conceptId: "concept-preserve",
+    conceptKind: "entity",
+    name: "User",
+    confidenceScore: 0.85,
+    contentHash: "h1",
+    realizedByElementIds: ["User", "UserImpl", "UserRepo"],
+  });
+  assert.equal(overlay.realizedByEdges("concept-preserve").length, 3);
+  overlay.renameConcept("concept-preserve", "Customer");
+  assert.equal(
+    overlay.realizedByEdges("concept-preserve").length,
+    3,
+    "renameConcept lost realizedBy edges — bug introduced by raw supersedeNode without edge reconciliation",
+  );
+});
+
+test("setEnrichment — preserves realizedBy edges and writes llmEnrichment (Fathom 5.0.39)", () => {
+  // The Haiku-concepts script (`run-haiku-concepts.ts`) writes
+  // `llmEnrichment` onto concept metadata by calling
+  // `graph.supersedeNode` directly — same bypass pattern as the
+  // Haiku-clusters bug. Same fix: add `setEnrichment(conceptId, ...)`
+  // to the overlay; the Haiku script switches over.
+  const graph = makeGraph();
+  const overlay = makeDomainModelOverlay(graph);
+  overlay.insertConcept({
+    conceptId: "to-enrich",
+    conceptKind: "bounded-context",
+    name: "user-mgmt",
+    confidenceScore: 0.9,
+    contentHash: "h1",
+    realizedByElementIds: ["User", "UserImpl", "UserRepo", "UserService"],
+  });
+  // Method does not yet exist — test fails with TypeError until 5.0.39.
+  const o = overlay as unknown as {
+    setEnrichment(
+      conceptId: string,
+      enrichment: { name: string; displayName?: string; summary?: string },
+    ): unknown;
+  };
+  o.setEnrichment("to-enrich", {
+    name: "user-management",
+    displayName: "User Management",
+    summary: "Identity + lifecycle.",
+  });
+  assert.equal(
+    overlay.realizedByEdges("to-enrich").length,
+    4,
+    "setEnrichment lost realizedBy edges — same class of bug as renameConcept",
+  );
+  const node = overlay.listConcepts().find((c) => c.metadata.conceptId === "to-enrich");
+  const enriched = (node?.metadata as { llmEnrichment?: { name?: string; displayName?: string } }).llmEnrichment;
+  assert.equal(enriched?.name, "user-management");
+  assert.equal(enriched?.displayName, "User Management");
+});
+
 test("renameConcept — throws on unknown conceptId", () => {
   const graph = makeGraph();
   const overlay = makeDomainModelOverlay(graph);
