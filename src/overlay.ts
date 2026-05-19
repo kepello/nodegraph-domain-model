@@ -7,7 +7,7 @@
  *   - `relatedTo`       → other concepts referenced from this one.
  */
 
-import type { Edge, GraphLayer, Node } from "@kepello/nodegraph-core";
+import type { Edge, GraphLayer, GraphMutator, Node } from "@kepello/nodegraph-core";
 import {
   DOMAIN_CONCEPT_DOMAIN,
   DOMAIN_CONCEPT_INDEXES,
@@ -27,21 +27,15 @@ import {
 } from "./types.js";
 
 export class DomainModelOverlayImpl implements DomainModelOverlay {
+  private readonly mutator: GraphMutator<typeof DOMAIN_CONCEPT_DOMAIN>;
+
   constructor(private readonly graph: GraphLayer) {
-    try {
-      this.graph.registerOverlay({
+    // Per Fathom row 5.0.42: registerOverlay returns the domain-scoped mutator.
+    this.mutator = this.graph.registerOverlay({
         domain: DOMAIN_CONCEPT_DOMAIN,
         metadataSchema: DOMAIN_CONCEPT_METADATA_SCHEMA,
         indexes: DOMAIN_CONCEPT_INDEXES,
       });
-    } catch (err) {
-      if (
-        !(err instanceof Error) ||
-        !err.message.includes("already registered for domain")
-      ) {
-        throw err;
-      }
-    }
   }
 
   insertConcept(input: DomainConceptInput): DomainConceptNode {
@@ -63,7 +57,7 @@ export class DomainModelOverlayImpl implements DomainModelOverlay {
     );
     let node: Node;
     if (existing === undefined) {
-      node = this.graph.insertNode({
+      node = this.mutator.insertNode({
         domain: DOMAIN_CONCEPT_DOMAIN,
         naturalKey: input.conceptId,
         contentHash: input.contentHash,
@@ -72,7 +66,7 @@ export class DomainModelOverlayImpl implements DomainModelOverlay {
     } else if (existing.contentHash === input.contentHash) {
       node = existing;
     } else {
-      node = this.graph.supersedeNode(existing.id, {
+      node = this.mutator.supersedeNode(existing.id, {
         contentHash: input.contentHash,
         metadata: metadata as unknown,
       });
@@ -102,7 +96,7 @@ export class DomainModelOverlayImpl implements DomainModelOverlay {
         (e.targetId === input.partOfContextId ||
           e.targetRef === input.partOfContextId);
       if (matches) hasContext = true;
-      else this.graph.tombstoneEdge(e.id);
+      else this.mutator.tombstoneEdge(e.id);
     }
     if (!hasContext && input.partOfContextId !== undefined) {
       this.emitEdge(node.id, input.partOfContextId, PART_OF_CONTEXT_EDGE_TYPE);
@@ -137,7 +131,7 @@ export class DomainModelOverlayImpl implements DomainModelOverlay {
     // the substrate cascade can't clean up.
     for (const [target, edgeId] of existingEdgeByTarget) {
       if (!wantedTargets.has(target)) {
-        this.graph.tombstoneEdge(edgeId);
+        this.mutator.tombstoneEdge(edgeId);
       }
     }
     for (const target of targets) {
@@ -149,9 +143,9 @@ export class DomainModelOverlayImpl implements DomainModelOverlay {
   private emitEdge(sourceId: string, target: string, edgeType: string): void {
     const byId = this.graph.getNodeById(target);
     if (byId !== undefined) {
-      this.graph.insertEdge({ sourceId, targetId: target, type: edgeType });
+      this.mutator.insertEdge({ sourceId, targetId: target, type: edgeType });
     } else {
-      this.graph.insertEdge({ sourceId, targetRef: target, type: edgeType });
+      this.mutator.insertEdge({ sourceId, targetRef: target, type: edgeType });
     }
   }
 
@@ -230,7 +224,7 @@ export class DomainModelOverlayImpl implements DomainModelOverlay {
     const relatedTo = captureTargets(RELATED_TO_EDGE_TYPE);
     const partOfContext = captureTargets(PART_OF_CONTEXT_EDGE_TYPE);
     const next = transform(prior);
-    const node = this.graph.supersedeNode(existing.id, {
+    const node = this.mutator.supersedeNode(existing.id, {
       contentHash: existing.contentHash,
       metadata: next as unknown,
     });
@@ -254,7 +248,7 @@ export class DomainModelOverlayImpl implements DomainModelOverlay {
           conceptId,
         );
         if (existing === undefined) return;
-        this.graph.tombstoneNode(existing.id);
+        this.mutator.tombstoneNode(existing.id);
       },
     );
   }
