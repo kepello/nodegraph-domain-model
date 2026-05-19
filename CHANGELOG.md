@@ -2,6 +2,28 @@
 
 All notable changes to `@kepello/nodegraph-domain-model`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.8.0] — 2026-05-19
+
+Adds — `DomainModelOverlay.setEnrichment(conceptId, llmEnrichment)` + `DomainConceptMetadata.llmEnrichment?` field. Fixes latent bug in `renameConcept`. Closes Fathom row 5.0.39 (concept half). TDD-driven.
+
+### Added
+
+- **`setEnrichment(conceptId, llmEnrichment)`** — writes `metadata.llmEnrichment` and re-emits `realizedBy` / `partOfContext` / `relatedTo` edges through a private `supersedeWithMetadata` helper. The ONLY correct path to persist LLM enrichment on a concept.
+- **`DomainConceptMetadata.llmEnrichment?`** — typed surface for the enrichment record (`name`, `displayName`, `summary`, `provenance`). Persisted by `setEnrichment`.
+
+### Fixed
+
+- **`renameConcept` no longer strips outgoing edges**. Same shape as the `renameCluster` bug in `nodegraph-clusters@0.7.0`: prior implementation called `graph.supersedeNode` directly; the substrate cascade tombstoned `realizedBy` / `partOfContext` / `relatedTo` outgoing edges. Now routes through `supersedeWithMetadata`: captures the prior tip's edge targets per type before supersede, re-emits them from the new tip after.
+
+### Internal
+
+- New `supersedeWithMetadata(conceptId, transform)` helper. Both `renameConcept` and `setEnrichment` route through it; future metadata-only supersedes follow the same path.
+
+### Tests
+
+- 2 new regression tests: `renameConcept — PRESERVES realizedBy edges through supersede (Fathom 5.0.39)` + `setEnrichment — preserves realizedBy edges and writes llmEnrichment (Fathom 5.0.39)`. Both RED pre-fix, GREEN post-fix.
+- 39/39 tests pass.
+
 ## [0.7.0] — 2026-05-19
 
 Adds — `detectEntities` accepts the `large-class` L1 stereotype when entity-shape holds (≥3 fields + ≥3 method children). Closes Fathom row 5.0.36. TDD-driven.

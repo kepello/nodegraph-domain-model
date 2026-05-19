@@ -162,26 +162,83 @@ export class DomainModelOverlayImpl implements DomainModelOverlay {
         producerDomain: DOMAIN_CONCEPT_DOMAIN,
         summary: `rename domain concept ${conceptId}`,
       },
-      () => {
-        const existing = this.graph.getLiveNodeByNaturalKey(
-          DOMAIN_CONCEPT_DOMAIN,
-          conceptId,
-        );
-        if (existing === undefined) {
-          throw new Error(`No live domain concept with conceptId=${conceptId}`);
-        }
-        const prior = existing.metadata as DomainConceptMetadata | null;
-        if (prior === null) {
-          throw new Error(`Domain concept ${conceptId} has no metadata`);
-        }
-        const next: DomainConceptMetadata = { ...prior, displayName };
-        const node = this.graph.supersedeNode(existing.id, {
-          contentHash: existing.contentHash,
-          metadata: next as unknown,
-        });
-        return asConcept(node);
-      },
+      () =>
+        this.supersedeWithMetadata(conceptId, (prior) => ({
+          ...prior,
+          displayName,
+        })),
     ).result;
+  }
+
+  setEnrichment(
+    conceptId: string,
+    enrichment: DomainConceptMetadata["llmEnrichment"],
+  ): DomainConceptNode {
+    return this.graph.transaction(
+      {
+        kind: "set-concept-enrichment",
+        producerDomain: DOMAIN_CONCEPT_DOMAIN,
+        summary: `set llmEnrichment on concept ${conceptId}`,
+      },
+      () =>
+        this.supersedeWithMetadata(conceptId, (prior) => ({
+          ...prior,
+          llmEnrichment: enrichment,
+        })),
+    ).result;
+  }
+
+  /**
+   * Shared supersede helper for concept-metadata-only changes (rename,
+   * enrichment writes). Reads the prior tip's outgoing `realizedBy` +
+   * `partOfContext` + `relatedTo` edges, supersedes with the
+   * transformed metadata, then re-emits the SAME edge set from the
+   * new node UUID. Per Fathom row 5.0.39 — raw `supersedeNode`
+   * cascades the prior tip's outgoing edges to tombstoned, so every
+   * metadata-only supersede MUST re-emit edges to preserve identity.
+   */
+  private supersedeWithMetadata(
+    conceptId: string,
+    transform: (prior: DomainConceptMetadata) => DomainConceptMetadata,
+  ): DomainConceptNode {
+    const existing = this.graph.getLiveNodeByNaturalKey(
+      DOMAIN_CONCEPT_DOMAIN,
+      conceptId,
+    );
+    if (existing === undefined) {
+      throw new Error(`No live domain concept with conceptId=${conceptId}`);
+    }
+    const prior = existing.metadata as DomainConceptMetadata | null;
+    if (prior === null) {
+      throw new Error(`Domain concept ${conceptId} has no metadata`);
+    }
+    // Capture prior outgoing edge targets BEFORE supersede; the
+    // substrate's cascade will tombstone them. Re-emitted from the
+    // new tip identically after supersede.
+    const captureTargets = (edgeType: string): string[] => {
+      const out: string[] = [];
+      for (const e of this.graph.edgesFrom(existing.id, {
+        type: edgeType,
+        includeDangling: true,
+      })) {
+        const key = e.targetId ?? e.targetRef;
+        if (key !== null) out.push(key);
+      }
+      return out;
+    };
+    const realizedBy = captureTargets(REALIZED_BY_EDGE_TYPE);
+    const relatedTo = captureTargets(RELATED_TO_EDGE_TYPE);
+    const partOfContext = captureTargets(PART_OF_CONTEXT_EDGE_TYPE);
+    const next = transform(prior);
+    const node = this.graph.supersedeNode(existing.id, {
+      contentHash: existing.contentHash,
+      metadata: next as unknown,
+    });
+    for (const t of realizedBy) this.emitEdge(node.id, t, REALIZED_BY_EDGE_TYPE);
+    for (const t of relatedTo) this.emitEdge(node.id, t, RELATED_TO_EDGE_TYPE);
+    for (const t of partOfContext)
+      this.emitEdge(node.id, t, PART_OF_CONTEXT_EDGE_TYPE);
+    return asConcept(node);
   }
 
   tombstoneConcept(conceptId: string): void {

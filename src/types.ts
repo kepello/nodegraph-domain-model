@@ -21,6 +21,17 @@ export interface DomainConceptMetadata {
   clusterId?: string;
   language?: string;
   confidenceScore: number;
+  /**
+   * LLM-supplied enrichment (Haiku-namer pipeline output). Persisted
+   * via `DomainModelOverlay.setEnrichment` — never write directly via
+   * `graph.supersedeNode` (Fathom row 5.0.39).
+   */
+  llmEnrichment?: {
+    name?: string;
+    displayName?: string;
+    summary?: string;
+    provenance?: Record<string, unknown>;
+  };
 }
 
 export interface DomainConceptInput {
@@ -49,6 +60,17 @@ export interface DomainConceptNode extends Omit<Node, "metadata"> {
 export interface DomainModelOverlay {
   insertConcept(input: DomainConceptInput): DomainConceptNode;
   renameConcept(conceptId: string, displayName: string): DomainConceptNode;
+  /**
+   * Write `llmEnrichment` onto a concept's metadata without changing
+   * identity. Per Fathom row 5.0.39: this is the ONLY correct path to
+   * persist LLM enrichment — calling `graph.supersedeNode` directly
+   * tombstones the concept's `realizedBy` / `partOfContext` / `relatedTo`
+   * edges and breaks membership.
+   */
+  setEnrichment(
+    conceptId: string,
+    enrichment: DomainConceptMetadata["llmEnrichment"],
+  ): DomainConceptNode;
   tombstoneConcept(conceptId: string): void;
   listConcepts(): DomainConceptNode[];
   getConcept(conceptId: string): DomainConceptNode | undefined;
