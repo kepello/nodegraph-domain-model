@@ -2,6 +2,19 @@
 
 All notable changes to `@kepello/nodegraph-domain-model`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.11.0] — 2026-05-28
+
+O(N²)→O(N) detector element lookups. Fathom row `perf-l7b-domain-model-linear-element-lookup` (5.0.1.7) — sibling of the L6 fix (5.0.1.6).
+
+### Fixed
+
+- `methodChildren` and `fieldChildren` did a linear `ctx.elements.find((e) => e.id === id)` per child, inside detector loops over every class (`detectEntities` / `detectValueObjects` / `detectDomainServices` / `detectAggregateRoots` iterate `classes()` or `ctx.elements` and call them). `classes()` re-`filter`ed all elements per detector, and `detectAggregateRoots` did `ctx.clusters.find(...)` per class. On the EnvisionWeb .NET workspace (85,353 elements, ~5000 classes, 1010 clusters) this made L7b `recoverDomainModel` the dominant L2-L7 sub-phase at **14s — 34% of the (post-L6-fix) 41.4s abstractions compute**.
+- New `indexOf(ctx)` builds — once per `recoverDomainModel` run, cached by context identity in a `WeakMap` — an `elementById: Map`, a `classList`, and a `clusterById: Map`. `recoverDomainModel` passes the same `DomainContext` to all five detectors, so the index builds once and is reused. Helpers resolve O(1). No `DomainContext` type change, no caller change.
+
+### Tests
+
+1 new Rule-4 pin in `detectors.test.ts` (spy on `elements.find`): the detector hot path does ZERO `Array.find` calls — children + clusters resolve via the indexes. Existing 44 cases unchanged; 45/45.
+
 ## [0.10.0] — 2026-05-19
 
 Adds — helper-module name-suffix exclusion across all DDD recovery detectors. Closes Fathom row 5.0.43 (round-8 F6 dotnet partial-class helper leak into bounded-contexts).

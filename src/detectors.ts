@@ -9,7 +9,7 @@
  * (3.1.1.2) which would give Wirfs-Brock role labels for sharper rules.
  */
 
-import type { DomainContext, DomainElement } from "./context.js";
+import type { DomainContext, DomainClusterInfo, DomainElement } from "./context.js";
 import type { ConceptKind } from "./types.js";
 
 export interface ComputedConcept {
@@ -63,8 +63,47 @@ const REALIZED_BY_KINDS: ReadonlySet<string> = new Set([
   "operator",
 ]);
 
+/**
+ * Per-context derived indexes, built once and cached by context
+ * identity (Fathom row 5.0.1.7 — sibling of the L6 fix 5.0.1.6).
+ * Pre-fix `methodChildren` / `fieldChildren` did linear
+ * `ctx.elements.find((e) => e.id === id)` per child inside detector
+ * loops over every class, `classes()` re-`filter`ed all elements per
+ * detector, and `detectAggregateRoots` did `ctx.clusters.find(...)`
+ * per class. On EnvisionWeb (.NET, 85K elements, ~5000 classes, 1010
+ * clusters) this made L7b `recoverDomainModel` the dominant L2-L7
+ * sub-phase at 14s (34% of abstractions after the L6 fix).
+ *
+ * `recoverDomainModel` passes the SAME `DomainContext` to all five
+ * detectors, so the index builds once per recover run and is reused.
+ * WeakMap keyed by context identity — no `DomainContext` type change,
+ * no caller change.
+ */
+interface ContextIndex {
+  elementById: Map<string, DomainElement>;
+  classList: DomainElement[];
+  clusterById: Map<string, DomainClusterInfo>;
+}
+const contextIndexCache = new WeakMap<DomainContext, ContextIndex>();
+function indexOf(ctx: DomainContext): ContextIndex {
+  let idx = contextIndexCache.get(ctx);
+  if (idx === undefined) {
+    const elementById = new Map<string, DomainElement>();
+    const classList: DomainElement[] = [];
+    for (const e of ctx.elements) {
+      elementById.set(e.id, e);
+      if (CLASS_KINDS.has(e.kind)) classList.push(e);
+    }
+    const clusterById = new Map<string, DomainClusterInfo>();
+    for (const c of ctx.clusters) clusterById.set(c.clusterId, c);
+    idx = { elementById, classList, clusterById };
+    contextIndexCache.set(ctx, idx);
+  }
+  return idx;
+}
+
 function classes(ctx: DomainContext): DomainElement[] {
-  return ctx.elements.filter((e) => CLASS_KINDS.has(e.kind));
+  return indexOf(ctx).classList;
 }
 
 /**
@@ -127,15 +166,17 @@ function isFixturePath(el: DomainElement): boolean {
 
 function methodChildren(ctx: DomainContext, classId: string): DomainElement[] {
   const ids = ctx.childrenOf.get(classId) ?? [];
+  const byId = indexOf(ctx).elementById;
   return ids
-    .map((id) => ctx.elements.find((e) => e.id === id))
+    .map((id) => byId.get(id))
     .filter((e): e is DomainElement => e !== undefined && METHOD_KINDS.has(e.kind));
 }
 
 function fieldChildren(ctx: DomainContext, classId: string): DomainElement[] {
   const ids = ctx.childrenOf.get(classId) ?? [];
+  const byId = indexOf(ctx).elementById;
   return ids
-    .map((id) => ctx.elements.find((e) => e.id === id))
+    .map((id) => byId.get(id))
     .filter((e): e is DomainElement => e !== undefined && FIELD_KINDS.has(e.kind));
 }
 
@@ -421,7 +462,7 @@ export function detectDomainServices(ctx: DomainContext): ComputedConcept[] {
     const clusterId = ctx.clusterByElement.get(cls.id);
     // Skip adapter-flavored clusters; they're infrastructure, not domain.
     if (clusterId !== undefined) {
-      const cluster = ctx.clusters.find((c) => c.clusterId === clusterId);
+      const cluster = indexOf(ctx).clusterById.get(clusterId);
       if (cluster !== undefined && /(adapter|gateway|client)/i.test(cluster.name)) {
         continue;
       }

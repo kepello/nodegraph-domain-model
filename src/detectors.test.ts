@@ -619,3 +619,57 @@ test("detectBoundedContexts — fires when at least one non-helper class is pres
   });
   assert.equal(out.length, 1, "mixed cluster should fire — only ALL-helper clusters are skipped");
 });
+
+// --- Fathom row 5.0.1.7: detectors use an O(1) element index ---------------
+//
+// Pre-fix methodChildren / fieldChildren did linear
+// `ctx.elements.find((e) => e.id === id)` per child inside detector
+// loops over every class; detectAggregateRoots did `ctx.clusters.find`
+// per class. On EnvisionWeb (85K elements, ~5000 classes, 1010
+// clusters) this made L7b the dominant L2-L7 phase (14s). Post-fix the
+// detectors resolve children + clusters through once-built Maps
+// (`indexOf(ctx)`). Rule 4 pin: the detector hot path must NOT call
+// `ctx.elements.find` (the index builds via for-of, not .find).
+
+test("detectors — per-class lookups use the index, not Array.find (Fathom 5.0.1.7)", () => {
+  const elements: DomainElement[] = [
+    { id: "User", name: "User", kind: "class" },
+    { id: "User.name", name: "name", kind: "field" },
+    { id: "User.email", name: "email", kind: "field" },
+    { id: "User.getName", name: "getName", kind: "method" },
+    { id: "OrderService", name: "OrderService", kind: "class" },
+    { id: "OrderService.place", name: "place", kind: "method" },
+  ];
+  for (let i = 0; i < 200; i++) {
+    elements.push({ id: `decoy${i}`, name: `decoy${i}`, kind: "function" });
+  }
+
+  let findCalls = 0;
+  const origFind = elements.find.bind(elements);
+  (elements as unknown as { find: typeof elements.find }).find = function (...args: Parameters<typeof origFind>) {
+    findCalls++;
+    return origFind(...args);
+  };
+
+  const ctx = buildContext({
+    elements,
+    classStereotypes: new Map([["User", "entity"], ["OrderService", "service"]]),
+    childrenOf: new Map([
+      ["User", ["User.name", "User.email", "User.getName"]],
+      ["OrderService", ["OrderService.place"]],
+    ]),
+  });
+
+  // Run the detectors that iterate classes() + call the per-class
+  // helpers. Correctness is covered by the dedicated detector tests
+  // above; here we pin lookup discipline only.
+  detectEntities(ctx);
+  detectValueObjects(ctx);
+  detectDomainServices(ctx);
+
+  assert.equal(
+    findCalls,
+    0,
+    `detector hot path must resolve children via the elementById index, not Array.find; got ${findCalls} find calls`,
+  );
+});
