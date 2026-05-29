@@ -13,6 +13,7 @@ import {
   DOMAIN_CONCEPT_INDEXES,
   DOMAIN_CONCEPT_METADATA_KIND,
   DOMAIN_CONCEPT_METADATA_SCHEMA,
+  DOMAIN_CONCEPT_SCHEMA_VERSION,
 } from "./schema.js";
 import {
   CONTAINS_CONCEPT_EDGE_TYPE,
@@ -33,6 +34,7 @@ export class DomainModelOverlayImpl implements DomainModelOverlay {
     // Per Fathom row 5.0.42: registerOverlay returns the domain-scoped mutator.
     this.mutator = this.graph.registerOverlay({
         domain: DOMAIN_CONCEPT_DOMAIN,
+        schemaVersion: DOMAIN_CONCEPT_SCHEMA_VERSION,
         metadataSchema: DOMAIN_CONCEPT_METADATA_SCHEMA,
         indexes: DOMAIN_CONCEPT_INDEXES,
       });

@@ -6,6 +6,13 @@ import type { IndexSpec, MetadataSchema } from "@kepello/nodegraph-core";
 
 export const DOMAIN_CONCEPT_DOMAIN = "domain-concept";
 
+/**
+ * Per-overlay schema version (substrate 1.12.2). Part of this domain's
+ * public contract; every registrant passes it. Bump when the metadata
+ * schema changes shape; V1 baseline is `1`.
+ */
+export const DOMAIN_CONCEPT_SCHEMA_VERSION = 1;
+
 export const DOMAIN_CONCEPT_METADATA_KIND = "domain-concept";
 
 export const DOMAIN_CONCEPT_METADATA_SCHEMA: MetadataSchema = {

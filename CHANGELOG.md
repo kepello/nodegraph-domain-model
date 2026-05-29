@@ -2,6 +2,14 @@
 
 All notable changes to `@kepello/nodegraph-domain-model`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.12.0] — 2026-05-28
+
+Adopt the per-overlay schema-version stamp (Fathom row 1.12.3). Exports `DOMAIN_CONCEPT_SCHEMA_VERSION` (= 1, V1 baseline) and declares it on the overlay's `OverlayRegistration`.
+
+### Changed
+
+- Registration now passes the mandatory `schemaVersion` field added in substrate 1.12.2. Peer dependency on `@kepello/nodegraph-core` retargeted to `^3.0.0`. No behavior change beyond the version stamp.
+
 ## [0.11.0] — 2026-05-28
 
 O(N²)→O(N) detector element lookups. Fathom row `perf-l7b-domain-model-linear-element-lookup` (5.0.1.7) — sibling of the L6 fix (5.0.1.6).
