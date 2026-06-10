@@ -2,6 +2,18 @@
 
 All notable changes to `@kepello/nodegraph-domain-model`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.13.0] — 2026-06-09
+
+**Same-identity concepts merge instead of colliding** (Fathom row `l7b-domain-concept-count-discrepancy` 5.0.21.3 — EnvisionWeb 1,165 emitted → 1,153 live, 12 silently lost).
+
+### Fixed
+
+- `recoverDomainModel` now merges concepts whose `(conceptKind, name, clusterId)` identity triple — and therefore `conceptId` — coincide (e.g. same-named .NET classes from different namespaces in one cluster scope): union of `realizedByElementIds` (sorted), max `confidenceScore`, union of contains/relatedTo name lists, language kept only when the halves agree. Pre-fix both concepts were returned; the second `insertConcept` silently superseded the first, losing one live node per collision pair and dropping the first's realizers. Identity semantics say they ARE one concept with multiple realizers — now the output count equals the persisted live count.
+
+### Tests
+
+- 1 regression (two same-named entities → one merged concept, no duplicate conceptIds). 46 pass.
+
 ## [0.12.0] — 2026-05-28
 
 Adopt the per-overlay schema-version stamp (Fathom row 1.12.3). Exports `DOMAIN_CONCEPT_SCHEMA_VERSION` (= 1, V1 baseline) and declares it on the overlay's `OverlayRegistration`.

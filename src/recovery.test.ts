@@ -163,3 +163,32 @@ test("recoverDomainModel — output sorted by descending confidence", () => {
   assert.ok(poorIdx >= 0);
   assert.ok(richIdx < poorIdx);
 });
+
+test("recoverDomainModel — REGRESSION 5.0.21.3: same-identity concepts MERGE (union realizers), never duplicate conceptIds", () => {
+  // Two same-named classes (e.g. .NET same-name-different-namespace
+  // landing in one cluster scope) detected as entities compute the
+  // same conceptId (kind+name+clusterId). Pre-fix both were returned;
+  // the second insertConcept superseded the first → 1 live node for 2
+  // emitted (the EnvisionWeb 1,165→1,153 loss). Identity says they're
+  // ONE concept with two realizers — merge.
+  const ctx: DomainContext = {
+    ...emptyContext(),
+    elements: [
+      { id: "ns1/User", name: "User", kind: "class" },
+      { id: "ns2/User", name: "User", kind: "class" },
+    ],
+    classStereotypes: new Map([
+      ["ns1/User", "entity"],
+      ["ns2/User", "entity"],
+    ]),
+  };
+  const result = recoverDomainModel({ context: ctx });
+  const ids = result.concepts.map((c) => c.conceptId);
+  assert.equal(new Set(ids).size, ids.length, "no duplicate conceptIds");
+  const entities = result.concepts.filter((c) => c.conceptKind === "entity");
+  assert.equal(entities.length, 1);
+  assert.deepEqual(
+    [...entities[0].realizedByElementIds].sort(),
+    ["ns1/User", "ns2/User"],
+  );
+});

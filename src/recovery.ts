@@ -82,12 +82,57 @@ export function recoverDomainModel(
     ...boundedContexts,
   ];
 
-  const filtered = all
+  const withIds = all
     .filter((c) => c.confidenceScore >= minConfidence)
     .map((c) => ({
       ...c,
       conceptId: computeConceptId(c.conceptKind, c.name, c.clusterId),
     }));
+
+  // Merge same-identity concepts (Fathom row 5.0.21.3): conceptId is
+  // (kind, name, clusterId) — two detector hits with the same triple
+  // (e.g. same-named .NET classes from different namespaces in one
+  // cluster scope) ARE one concept with multiple realizers. Pre-merge,
+  // the second insertConcept silently superseded the first, losing a
+  // node per collision pair (EnvisionWeb: 1,165 emitted → 1,153 live).
+  const byConceptId = new Map<string, (typeof withIds)[number]>();
+  for (const c of withIds) {
+    const prior = byConceptId.get(c.conceptId);
+    if (prior === undefined) {
+      byConceptId.set(c.conceptId, c);
+      continue;
+    }
+    byConceptId.set(c.conceptId, {
+      ...prior,
+      confidenceScore: Math.max(prior.confidenceScore, c.confidenceScore),
+      realizedByElementIds: [
+        ...new Set([...prior.realizedByElementIds, ...c.realizedByElementIds]),
+      ].sort(),
+      ...(prior.containsConceptNames !== undefined || c.containsConceptNames !== undefined
+        ? {
+            containsConceptNames: [
+              ...new Set([
+                ...(prior.containsConceptNames ?? []),
+                ...(c.containsConceptNames ?? []),
+              ]),
+            ].sort(),
+          }
+        : {}),
+      ...(prior.relatedToConceptNames !== undefined || c.relatedToConceptNames !== undefined
+        ? {
+            relatedToConceptNames: [
+              ...new Set([
+                ...(prior.relatedToConceptNames ?? []),
+                ...(c.relatedToConceptNames ?? []),
+              ]),
+            ].sort(),
+          }
+        : {}),
+      // Language stays only when the merged halves agree.
+      ...(prior.language === c.language ? {} : { language: undefined }),
+    });
+  }
+  const filtered = [...byConceptId.values()];
 
   filtered.sort((a, b) => {
     if (b.confidenceScore !== a.confidenceScore) {
