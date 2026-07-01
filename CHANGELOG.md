@@ -2,6 +2,16 @@
 
 All notable changes to `@kepello/nodegraph-domain-model`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.15.0] — 2026-07-01
+
+**Full 27-row `isFixturePath` matrix suite enforces lockstep invariant** (Fathom row `fixture-path-detection-cross-language` 5.0.14.2 reviewer fix F2). The package-local `isFixturePath` in `detectors.ts` is a byte-identical duplicate of `isFixturePathString` in `@kepello/nodegraph-analysis` — kept local to avoid a peer-dep (see detectors.ts ~lines 128-131). Before this version nothing FAILED if one drifted; the cross-surface-coordination.test.ts comment in nodegraph-analysis falsely implied it also pinned the `detectors.ts` copy (it only exercises the canonical via L1 stereotype derivations). This version adds the complete 27-row behavioral matrix to `detectors.test.ts` so a clause drift in EITHER copy fails its own package suite. No code changes — tests only.
+
+### Tests
+
+- **`src/detectors.test.ts` — 33 new tests** across the full 27-row matrix (6 H1 spot-checks of the original six clauses + all 12 H2 positives + 15 production negatives, two rows exercised via the `id` fallback path): `isFixturePath matrix — row N: ...`. Uses two helpers: `makeEntityCtxWithArtifact(artifactId)` (calls detector with `el.artifactId`); `makeEntityCtxWithIdFallback(id)` (no `artifactId` — exercises the `el.artifactId ?? el.id` fallback). RED witnessed: temporarily removing clause (a) failed rows 1–4 (and the existing clause-a regression); GREEN restored at code unchanged.
+
+Suite: 83 pass (was 50).
+
 ## [0.14.0] — 2026-07-01
 
 **Cross-language fixture-path detection broadened in `isFixturePath` (lockstep with canonical)** (Fathom row `fixture-path-detection-cross-language` 5.0.14.2). The package-local `isFixturePath` predicate (kept local to avoid a peer-dep on `@kepello/nodegraph-analysis` — see detectors.ts ~lines 128-131) gains the same three clauses simultaneously shipped in the canonical `isFixturePathString`: (a) `*-fixtures/` dir segment, (b) `.Tests`/`.Test` project dir (capital-T), (c) `*Tests.cs`/`*Tests.swift` file suffix (capital-T). Both bodies must remain byte-identical per the cross-surface coordination invariant (row 5.0.34). Pre-prod: delete + re-analyze clears any leaked fixture elements from DDD detection.

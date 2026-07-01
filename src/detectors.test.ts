@@ -753,6 +753,312 @@ test("detectEntities — production path with 'contest' or 'latest' in name is N
   );
 });
 
+// --- Full 27-row isFixturePath matrix (5.0.14.2 lockstep invariant) ----------
+//
+// The `isFixturePath` function inside this package is a byte-identical
+// duplicate of `isFixturePathString` in `@kepello/nodegraph-analysis`
+// (kept local to avoid a peer-dep). Nothing FAILS if one drifts — so
+// this full-matrix suite independently pins the duplicate to the same
+// 27-row behavioral contract. A clause drift in detectors.ts (without
+// a matching change here) will fail THIS suite; a drift in
+// nodegraph-analysis fails its own fixture-paths.test.ts suite.
+//
+// testing.md Rule 5 / cross-surface coordination invariant (row 5.0.34):
+// the `nodegraph-domain-model` copy is pinned by detectors.test.ts
+// (this file); the canonical copy is pinned by fixture-paths.test.ts.
+//
+// isFixturePath(el) reads `el.artifactId ?? el.id` — so the tests
+// exercise BOTH: most use `artifactId`, row 4 uses the `id` fallback.
+//
+// Helper: build a minimal "entity-class" DomainContext for one element.
+// Two-field child count satisfies the entity detector's ≥2-field guard.
+// `classStereotypes: entity` satisfies the stereotype gate.
+
+function makeEntityCtxWithArtifact(artifactId: string): ReturnType<typeof buildContext> {
+  const elId = `el#E`;
+  return buildContext({
+    elements: [
+      { id: elId, name: "E", kind: "class", artifactId },
+      { id: `${elId}.f1`, name: "f1", kind: "field" },
+      { id: `${elId}.f2`, name: "f2", kind: "field" },
+    ],
+    classStereotypes: new Map([[elId, "entity"]]),
+    childrenOf: new Map([[elId, [`${elId}.f1`, `${elId}.f2`]]]),
+  });
+}
+
+function makeEntityCtxWithIdFallback(id: string): ReturnType<typeof buildContext> {
+  // No `artifactId` — isFixturePath falls back to `el.id`.
+  return buildContext({
+    elements: [
+      { id, name: "E", kind: "class" },
+      { id: `${id}.f1`, name: "f1", kind: "field" },
+      { id: `${id}.f2`, name: "f2", kind: "field" },
+    ],
+    classStereotypes: new Map([[id, "entity"]]),
+    childrenOf: new Map([[id, [`${id}.f1`, `${id}.f2`]]]),
+  });
+}
+
+// H1 + H2 positives — must be EXCLUDED from entity detection (result length 0)
+
+// Existing H1 clauses (original six patterns) — spot-checks
+
+test("isFixturePath matrix — row H1a: /tests/ dir segment (existing clause)", () => {
+  assert.equal(detectEntities(makeEntityCtxWithArtifact("/proj/src/tests/thing.cs")).length, 0);
+});
+
+test("isFixturePath matrix — row H1b: /fixtures/ dir segment (existing clause)", () => {
+  assert.equal(detectEntities(makeEntityCtxWithArtifact("/proj/src/fixtures/thing.cs")).length, 0);
+});
+
+test("isFixturePath matrix — row H1c: /testdata/ dir segment (existing clause)", () => {
+  assert.equal(detectEntities(makeEntityCtxWithArtifact("/proj/src/testdata/thing.cs")).length, 0);
+});
+
+test("isFixturePath matrix — row H1d: /__tests__/ dir segment (existing clause)", () => {
+  assert.equal(detectEntities(makeEntityCtxWithArtifact("/proj/src/__tests__/thing.ts")).length, 0);
+});
+
+test("isFixturePath matrix — row H1e: /__mocks__/ dir segment (existing clause)", () => {
+  assert.equal(detectEntities(makeEntityCtxWithArtifact("/proj/src/__mocks__/thing.ts")).length, 0);
+});
+
+test("isFixturePath matrix — row H1f: .test. file suffix (existing clause)", () => {
+  assert.equal(detectEntities(makeEntityCtxWithArtifact("/proj/src/thing.test.ts#thing")).length, 0);
+});
+
+// H2 positives: clause (a) *-fixtures DIR segment
+
+test("isFixturePath matrix — row 1: fathom-test-fixtures/ dir (clause a, slash sep)", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact(".../fathom-test-fixtures/cross-lang-metrics/dotnet/01-empty.cs")).length,
+    0,
+    "row 1: *-fixtures dir must be excluded (clause a)",
+  );
+});
+
+test("isFixturePath matrix — row 2: fathom-test-fixtures/ swift path (clause a)", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact(".../fathom-test-fixtures/cross-lang-metrics/swift/01-empty.swift")).length,
+    0,
+    "row 2: *-fixtures dir swift path must be excluded (clause a)",
+  );
+});
+
+test("isFixturePath matrix — row 3: fathom-test-fixtures/dotnet-msbuild/ (clause a)", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact(".../fathom-test-fixtures/dotnet-msbuild/Orphan.cs")).length,
+    0,
+    "row 3: *-fixtures dir must be excluded (clause a)",
+  );
+});
+
+test("isFixturePath matrix — row 4: colon natural-key with *-fixtures segment (clause a, id fallback)", () => {
+  // No artifactId supplied — isFixturePath falls back to el.id.
+  // Confirms the `el.artifactId ?? el.id` fallback path in detectors.ts:156.
+  assert.equal(
+    detectEntities(makeEntityCtxWithIdFallback(
+      ":Users:carl:Developer:fathom-test-fixtures:dotnet-msbuild:Orphan.cs",
+    )).length,
+    0,
+    "row 4: colon-sep natural-key *-fixtures path must be excluded via id fallback (clause a)",
+  );
+});
+
+// H2 positives: clause (b) C# .Tests/.Test project DIR
+
+test("isFixturePath matrix — row 5: /repo/Foo.Tests/BarTests.cs (clause b)", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact("/repo/Foo.Tests/BarTests.cs")).length,
+    0,
+    "row 5: .Tests/ dir must be excluded (clause b)",
+  );
+});
+
+test("isFixturePath matrix — row 6: /repo/Foo.Tests/Helper.cs non-test-named file (clause b)", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact("/repo/Foo.Tests/Helper.cs")).length,
+    0,
+    "row 6: .Tests/ dir must exclude even non-test-named files (clause b)",
+  );
+});
+
+test("isFixturePath matrix — row 9: /repo/App.Test/Thing.cs singular .Test dir (clause b)", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact("/repo/App.Test/Thing.cs")).length,
+    0,
+    "row 9: .Test/ singular dir must be excluded (clause b)",
+  );
+});
+
+// H2 positives: clause (c) *Tests/*Test FILE suffix before .cs/.swift
+
+test("isFixturePath matrix — row 7: /repo/Sources/FooTests.swift (clause c)", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact("/repo/Sources/FooTests.swift")).length,
+    0,
+    "row 7: *Tests.swift file suffix must be excluded (clause c)",
+  );
+});
+
+test("isFixturePath matrix — row 8: /repo/src/BarTest.cs singular Test suffix (clause c)", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact("/repo/src/BarTest.cs")).length,
+    0,
+    "row 8: *Test.cs singular suffix must be excluded (clause c)",
+  );
+});
+
+// H2 positives: combined clause matches
+
+test("isFixturePath matrix — row 10: /proj/Tests/.../CognitiveTests.swift (existing /Tests/ + clause c)", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact(
+      "/proj/Tests/NodegraphAnalyzerSwiftTests/CognitiveTests.swift",
+    )).length,
+    0,
+    "row 10: PascalCase Tests/ dir + *Tests.swift must be excluded",
+  );
+});
+
+test("isFixturePath matrix — row 11: .../tests/CyclomaticTests.cs (existing /tests/ + clause c)", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact(
+      ".../nodegraph-analyzer-dotnet/tests/CyclomaticTests.cs",
+    )).length,
+    0,
+    "row 11: /tests/ dir OR *Tests.cs suffix must be excluded",
+  );
+});
+
+test("isFixturePath matrix — row 27: Windows backslash .Tests\\ (clause b, backslash sep)", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact("C:\\proj\\Foo.Tests\\BarTests.cs")).length,
+    0,
+    "row 27: Windows backslash .Tests\\ dir must be excluded (clause b)",
+  );
+});
+
+// Production negatives — MUST NOT be excluded (result length 1)
+
+test("isFixturePath matrix — row 12: tarjan-scc-fixtures.ts FILE (no trailing sep, clause a must NOT fire)", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact(
+      ".../nodegraph-core/src/algorithms/tarjan-scc-fixtures.ts",
+    )).length,
+    1,
+    "row 12: *-fixtures.ts is a FILE (no trailing sep) — clause (a) must NOT fire",
+  );
+});
+
+test("isFixturePath matrix — row 13: conformance.ts production file", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact(".../nodegraph-core/src/conformance.ts")).length,
+    1,
+    "row 13: conformance.ts must NOT be excluded",
+  );
+});
+
+test("isFixturePath matrix — row 14: sqlite.ts production file", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact(".../nodegraph-sqlite/src/sqlite.ts")).length,
+    1,
+  );
+});
+
+test("isFixturePath matrix — row 15: in-memory.ts production file", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact(".../nodegraph-sqlite/src/in-memory.ts")).length,
+    1,
+  );
+});
+
+test("isFixturePath matrix — row 16: Latest.cs — 'Latest' contains 'test' substring but no capital-T boundary", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact("/repo/src/Latest.cs")).length,
+    1,
+    "row 16: Latest.cs must NOT match — no capital-T 'Test' suffix",
+  );
+});
+
+test("isFixturePath matrix — row 17: LatestNews.cs production file", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact("/repo/src/LatestNews.cs")).length,
+    1,
+  );
+});
+
+test("isFixturePath matrix — row 18: ContestManager.cs — 'Contest' not a test boundary", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact("/repo/src/ContestManager.cs")).length,
+    1,
+    "row 18: ContestManager.cs must NOT be excluded",
+  );
+});
+
+test("isFixturePath matrix — row 19: attestation.ts production file", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact("/repo/src/attestation.ts")).length,
+    1,
+  );
+});
+
+test("isFixturePath matrix — row 20: manifest.ts production file", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact("/repo/src/manifest.ts")).length,
+    1,
+  );
+});
+
+test("isFixturePath matrix — row 21: GreatestHits.swift production file", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact("/repo/Sources/App/GreatestHits.swift")).length,
+    1,
+    "row 21: GreatestHits.swift must NOT match — no Tests suffix",
+  );
+});
+
+test("isFixturePath matrix — row 22: test-utils.ts — filename starts with 'test-', no dir segment", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact("/repo/src/test-utils.ts")).length,
+    1,
+    "row 22: test-utils.ts is a production util — must NOT match",
+  );
+});
+
+test("isFixturePath matrix — row 23: fixtures.ts FILE named fixtures (no trailing sep)", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact("/repo/src/fixtures.ts")).length,
+    1,
+    "row 23: fixtures.ts is a FILE (no trailing sep) — must NOT match",
+  );
+});
+
+test("isFixturePath matrix — row 24: data-fixtures.ts FILE (no trailing sep after *-fixtures token)", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact("/repo/src/data-fixtures.ts")).length,
+    1,
+    "row 24: data-fixtures.ts is a FILE — clause (a) must NOT fire",
+  );
+});
+
+test("isFixturePath matrix — row 25: natural-key tarjan-scc-fixtures.ts#tarjanscc (no trailing sep)", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithIdFallback(":...:tarjan-scc-fixtures.ts#tarjanscc")).length,
+    1,
+    "row 25: *-fixtures.ts#elem natural-key must NOT match (id fallback, no trailing sep)",
+  );
+});
+
+test("isFixturePath matrix — row 26: lowercase .tests/ dir (deliberately NOT matched by capital-T clause b)", () => {
+  assert.equal(
+    detectEntities(makeEntityCtxWithArtifact("/repo/foo.tests/thing.cs")).length,
+    1,
+    "row 26: lowercase .tests/ must NOT match — clause (b) is capital-T anchored",
+  );
+});
+
 test("detectors — per-class lookups use the index, not Array.find (Fathom 5.0.1.7)", () => {
   const elements: DomainElement[] = [
     { id: "User", name: "User", kind: "class" },
