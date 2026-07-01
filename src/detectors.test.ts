@@ -631,6 +631,128 @@ test("detectBoundedContexts — fires when at least one non-helper class is pres
 // (`indexOf(ctx)`). Rule 4 pin: the detector hot path must NOT call
 // `ctx.elements.find` (the index builds via for-of, not .find).
 
+// --- cross-language fixture-path detection (5.0.14.2) -----------------------
+//
+// Regression: before clauses (a)/(b)/(c) were added to `isFixturePath`,
+// C# classes under *-fixtures dirs, .Tests project dirs, or *Tests file
+// suffix leaked into DDD detection as entities / value-objects / domain
+// services. Each test mirrors the `isFixturePath` predicate inside this
+// package (which is kept package-local to avoid a peer-dep — see
+// detectors.ts ~lines 128-131).
+
+test("detectEntities — rejects element under *-fixtures dir (5.0.14.2 clause a)", () => {
+  // A class under a `fathom-test-fixtures/` path must be excluded from
+  // entity detection. Before clause (a) was added, the *-fixtures dir
+  // convention was not recognized and such classes leaked as entities.
+  const ctx = buildContext({
+    elements: [
+      {
+        id: ":proj:fathom-test-fixtures:dotnet:01-empty.cs#Empty",
+        name: "Empty",
+        kind: "class",
+        artifactId: "/proj/fathom-test-fixtures/dotnet/01-empty.cs",
+      },
+      { id: ":proj:fathom-test-fixtures:dotnet:01-empty.cs#Empty.id", name: "id", kind: "field" },
+      { id: ":proj:fathom-test-fixtures:dotnet:01-empty.cs#Empty.name", name: "name", kind: "field" },
+    ],
+    classStereotypes: new Map([[":proj:fathom-test-fixtures:dotnet:01-empty.cs#Empty", "entity"]]),
+    childrenOf: new Map([
+      [":proj:fathom-test-fixtures:dotnet:01-empty.cs#Empty",
+        [":proj:fathom-test-fixtures:dotnet:01-empty.cs#Empty.id",
+         ":proj:fathom-test-fixtures:dotnet:01-empty.cs#Empty.name"]],
+    ]),
+  });
+  assert.equal(
+    detectEntities(ctx).length,
+    0,
+    "class under *-fixtures dir must be excluded from entity detection (5.0.14.2 clause a)",
+  );
+});
+
+test("detectEntities — rejects element in .Tests project dir (5.0.14.2 clause b)", () => {
+  // C# class in a `Foo.Tests/` project dir: capital-T anchored, must
+  // be excluded from entity detection.
+  const ctx = buildContext({
+    elements: [
+      {
+        id: "/repo/Foo.Tests/BarTests.cs#BarTests",
+        name: "BarTests",
+        kind: "class",
+        artifactId: "/repo/Foo.Tests/BarTests.cs",
+      },
+      { id: "/repo/Foo.Tests/BarTests.cs#BarTests.id", name: "id", kind: "field" },
+      { id: "/repo/Foo.Tests/BarTests.cs#BarTests.name", name: "name", kind: "field" },
+    ],
+    classStereotypes: new Map([["/repo/Foo.Tests/BarTests.cs#BarTests", "entity"]]),
+    childrenOf: new Map([
+      ["/repo/Foo.Tests/BarTests.cs#BarTests",
+        ["/repo/Foo.Tests/BarTests.cs#BarTests.id",
+         "/repo/Foo.Tests/BarTests.cs#BarTests.name"]],
+    ]),
+  });
+  assert.equal(
+    detectEntities(ctx).length,
+    0,
+    "class in .Tests/ project dir must be excluded from entity detection (5.0.14.2 clause b)",
+  );
+});
+
+test("detectEntities — rejects element with *Tests.cs file suffix (5.0.14.2 clause c)", () => {
+  // C# class named BarTests in a *Tests.cs file: capital-T anchored,
+  // must be excluded from entity detection.
+  const ctx = buildContext({
+    elements: [
+      {
+        id: "/repo/src/BarTests.cs#BarTests",
+        name: "BarTests",
+        kind: "class",
+        artifactId: "/repo/src/BarTests.cs",
+      },
+      { id: "/repo/src/BarTests.cs#BarTests.id", name: "id", kind: "field" },
+      { id: "/repo/src/BarTests.cs#BarTests.name", name: "name", kind: "field" },
+    ],
+    classStereotypes: new Map([["/repo/src/BarTests.cs#BarTests", "entity"]]),
+    childrenOf: new Map([
+      ["/repo/src/BarTests.cs#BarTests",
+        ["/repo/src/BarTests.cs#BarTests.id",
+         "/repo/src/BarTests.cs#BarTests.name"]],
+    ]),
+  });
+  assert.equal(
+    detectEntities(ctx).length,
+    0,
+    "class in *Tests.cs file must be excluded from entity detection (5.0.14.2 clause c)",
+  );
+});
+
+test("detectEntities — production path with 'contest' or 'latest' in name is NOT excluded (5.0.14.2 negative)", () => {
+  // Capital-T precision: ContestManager.cs and Latest.cs must NOT be
+  // caught by clause (c) — only capital-T `Tests?` suffix matches.
+  const ctx = buildContext({
+    elements: [
+      {
+        id: "/repo/src/ContestManager.cs#ContestManager",
+        name: "ContestManager",
+        kind: "class",
+        artifactId: "/repo/src/ContestManager.cs",
+      },
+      { id: "/repo/src/ContestManager.cs#ContestManager.id", name: "id", kind: "field" },
+      { id: "/repo/src/ContestManager.cs#ContestManager.name", name: "name", kind: "field" },
+    ],
+    classStereotypes: new Map([["/repo/src/ContestManager.cs#ContestManager", "entity"]]),
+    childrenOf: new Map([
+      ["/repo/src/ContestManager.cs#ContestManager",
+        ["/repo/src/ContestManager.cs#ContestManager.id",
+         "/repo/src/ContestManager.cs#ContestManager.name"]],
+    ]),
+  });
+  assert.equal(
+    detectEntities(ctx).length,
+    1,
+    "ContestManager.cs is a production entity — must NOT be excluded by clause (c)",
+  );
+});
+
 test("detectors — per-class lookups use the index, not Array.find (Fathom 5.0.1.7)", () => {
   const elements: DomainElement[] = [
     { id: "User", name: "User", kind: "class" },

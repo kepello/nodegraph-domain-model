@@ -160,7 +160,23 @@ function isFixturePath(el: DomainElement): boolean {
     /[:\/\\]testdata[:\/\\]/i.test(haystack) ||
     /[:\/\\]__tests__[:\/\\]/i.test(haystack) ||
     /[:\/\\]__mocks__[:\/\\]/i.test(haystack) ||
-    /\.(test|spec)\.[a-z]+(#|$)/i.test(haystack)
+    /\.(test|spec)\.[a-z]+(#|$)/i.test(haystack) ||
+    // (a) *-fixtures DIR segment (hyphenated fixture dirs, e.g.
+    //     fathom-test-fixtures/). Trailing separator => DIR only;
+    //     a bare *-fixtures.ts filename does NOT match (no trailing sep).
+    //     Case-insensitive: kebab dir names have no casing convention.
+    /[:\/\\][A-Za-z0-9._-]*-fixtures[:\/\\]/i.test(haystack) ||
+    // (b) C# .Tests / .Test project DIR segment (capital-T anchored;
+    //     xUnit / NUnit / MSTest project layout). Case-SENSITIVE:
+    //     capital-T defeats production words like `.contest/`, `.latest/`
+    //     that contain `test` as a lowercase substring. Lowercase
+    //     `.tests/` is deliberately NOT matched (row 26 in the matrix).
+    /[:\/\\][A-Za-z0-9._-]*\.Tests?[:\/\\]/.test(haystack) ||
+    // (c) *Tests / *Test FILE suffix before .cs / .swift (PascalCase,
+    //     capital-T anchored). Case-SENSITIVE: capital-T defeats
+    //     `Latest.cs`, `ContestManager.cs`, `attestation.ts`.
+    //     `meta.artifactId` is PascalCase-preserved so the anchor is safe.
+    /[A-Za-z0-9]Tests?\.(cs|swift)(#|$)/.test(haystack)
   );
 }
 

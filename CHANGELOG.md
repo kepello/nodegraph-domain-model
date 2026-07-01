@@ -2,6 +2,20 @@
 
 All notable changes to `@kepello/nodegraph-domain-model`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.14.0] — 2026-07-01
+
+**Cross-language fixture-path detection broadened in `isFixturePath` (lockstep with canonical)** (Fathom row `fixture-path-detection-cross-language` 5.0.14.2). The package-local `isFixturePath` predicate (kept local to avoid a peer-dep on `@kepello/nodegraph-analysis` — see detectors.ts ~lines 128-131) gains the same three clauses simultaneously shipped in the canonical `isFixturePathString`: (a) `*-fixtures/` dir segment, (b) `.Tests`/`.Test` project dir (capital-T), (c) `*Tests.cs`/`*Tests.swift` file suffix (capital-T). Both bodies must remain byte-identical per the cross-surface coordination invariant (row 5.0.34). Pre-prod: delete + re-analyze clears any leaked fixture elements from DDD detection.
+
+### Fixed
+
+- **`src/detectors.ts` → `isFixturePath`** — three new clauses appended, byte-identical to `nodegraph-analysis@3.33.0`'s `isFixturePathString` clauses (a)/(b)/(c). C# classes under `*-fixtures/` dirs, `.Tests/` project dirs, or `*Tests.cs`/`*Tests.swift` files are now correctly excluded from `detectEntities`, `detectValueObjects`, `detectDomainServices`.
+
+### Tests
+
+- 4 new regressions in `src/detectors.test.ts`: (a) entity rejected for class under `*-fixtures/` dir; (b) entity rejected for class in `.Tests/` dir; (c) entity rejected for class in `*Tests.cs` file; (d) production entity NOT excluded — `ContestManager.cs` still fires as entity (capital-T precision guard).
+
+Suite: 50 pass (was 46).
+
 ## [0.13.0] — 2026-06-09
 
 **Same-identity concepts merge instead of colliding** (Fathom row `l7b-domain-concept-count-discrepancy` 5.0.21.3 — EnvisionWeb 1,165 emitted → 1,153 live, 12 silently lost).
