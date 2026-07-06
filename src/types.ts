@@ -12,6 +12,22 @@ export type ConceptKind =
   | "domain-service"
   | "bounded-context";
 
+/**
+ * Runtime enumeration of `ConceptKind`'s members — TS unions aren't
+ * iterable at runtime, so this mirrors it explicitly. The `satisfies`
+ * clause makes the compiler itself flag drift if a member is added to
+ * or removed from `ConceptKind` without updating this array. Pins
+ * `DOMAIN_CONCEPT_METADATA_SCHEMA`'s `conceptKind.enum` against the
+ * real union in `schema.test.ts`.
+ */
+export const ALL_CONCEPT_KINDS = [
+  "entity",
+  "value-object",
+  "aggregate-root",
+  "domain-service",
+  "bounded-context",
+] as const satisfies readonly ConceptKind[];
+
 export interface DomainConceptMetadata {
   kind: typeof DOMAIN_CONCEPT_METADATA_KIND;
   conceptId: string;

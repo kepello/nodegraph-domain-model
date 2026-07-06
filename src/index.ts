@@ -17,6 +17,7 @@ export {
   PART_OF_CONTEXT_EDGE_TYPE,
   REALIZED_BY_EDGE_TYPE,
   RELATED_TO_EDGE_TYPE,
+  ALL_CONCEPT_KINDS,
   type ConceptKind,
   type DomainConceptInput,
   type DomainConceptMetadata,

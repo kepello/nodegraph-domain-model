@@ -1,6 +1,6 @@
 {
   "name": "@kepello/nodegraph-domain-model",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "description": "Domain model recovery for @kepello/nodegraph: entities, value objects, aggregate roots, domain services, bounded contexts. Seventh-b layer of the Layered Code Abstraction arc.",
   "type": "module",
   "main": "dist/index.js",

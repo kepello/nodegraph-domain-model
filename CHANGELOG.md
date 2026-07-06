@@ -2,6 +2,21 @@
 
 All notable changes to `@kepello/nodegraph-domain-model`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.16.0] — 2026-07-06
+
+**`conceptKind` gains a curated, documented value catalog in the metadata schema.** The inspector's `enum` → chip-rendering consumer (`@kepello/nodegraph-core` `MetadataSchemaProperty`) had a bare list of five strings with no explanation of what each one means; an operator staring at a `bounded-context` chip had no way to learn what fired it without reading `detectors.ts`.
+
+### Added
+
+- `DOMAIN_CONCEPT_METADATA_SCHEMA`'s `conceptKind` property gains `enumDescriptions: Record<ConceptKind, string>` — one DDD-grounded sentence per kind, each tied to the actual detector logic in `detectors.ts` (stereotype gates, field/method thresholds, cluster thresholds), not textbook DDD in the abstract.
+- `types.ts` exports `ALL_CONCEPT_KINDS` — a runtime mirror of the `ConceptKind` union (`as const satisfies readonly ConceptKind[]`, so the compiler flags drift between the array and the union). Public API surface via `index.ts`.
+
+### Tests
+
+- New `src/schema.test.ts` — 2 tests: `conceptKind.enum` deep-equals `ALL_CONCEPT_KINDS` (pins the schema's enum against the real `ConceptKind` union); every `enum` value has exactly one matching `enumDescriptions` entry, no extras, no gaps. RED witnessed by temporarily dropping `bounded-context` from the schema's `enum` array — both tests failed with the expected diff; restored to GREEN unchanged.
+
+Suite: 85 pass (was 83).
+
 ## [0.15.0] — 2026-07-01
 
 **Full 27-row `isFixturePath` matrix suite enforces lockstep invariant** (Fathom row `fixture-path-detection-cross-language` 5.0.14.2 reviewer fix F2). The package-local `isFixturePath` in `detectors.ts` is a byte-identical duplicate of `isFixturePathString` in `@kepello/nodegraph-analysis` — kept local to avoid a peer-dep (see detectors.ts ~lines 128-131). Before this version nothing FAILED if one drifted; the cross-surface-coordination.test.ts comment in nodegraph-analysis falsely implied it also pinned the `detectors.ts` copy (it only exercises the canonical via L1 stereotype derivations). This version adds the complete 27-row behavioral matrix to `detectors.test.ts` so a clause drift in EITHER copy fails its own package suite. No code changes — tests only.

@@ -3,6 +3,7 @@
  */
 
 import type { IndexSpec, MetadataSchema } from "@kepello/nodegraph-core";
+import type { ConceptKind } from "./types.js";
 
 export const DOMAIN_CONCEPT_DOMAIN = "domain-concept";
 
@@ -14,6 +15,26 @@ export const DOMAIN_CONCEPT_DOMAIN = "domain-concept";
 export const DOMAIN_CONCEPT_SCHEMA_VERSION = 1;
 
 export const DOMAIN_CONCEPT_METADATA_KIND = "domain-concept";
+
+/**
+ * One DDD-grounded sentence per `ConceptKind`, tied to what the actual
+ * detector in `detectors.ts` looks for (not textbook DDD in the
+ * abstract). Consumed by `conceptKind.enumDescriptions` below; the
+ * `Record<ConceptKind, string>` annotation makes the compiler enforce
+ * that every union member has an entry.
+ */
+const CONCEPT_KIND_DESCRIPTIONS: Record<ConceptKind, string> = {
+  entity:
+    "A domain object with continuous identity across state changes over time — detected via the `entity`/`large-class`-with-entity-shape class stereotype, or a TS interface/type-alias with 3+ fields plus either method behavior or an implementor (extends/implements edge).",
+  "value-object":
+    "An immutable, identity-less object defined solely by its attribute values — detected via the `data-class` stereotype with no mutator-shaped methods, or a shape-only interface/type-alias with 2+ fields and no methods.",
+  "aggregate-root":
+    "The single entry-point entity of a cluster of related entities, responsible for guarding the consistency of the whole aggregate — detected per-cluster as the entity with the most inbound same-cluster entity-to-entity references, requiring 2+ entities in the cluster and at least one such inbound reference.",
+  "domain-service":
+    "A stateless domain operation that doesn't naturally belong to any entity or value object, expressed as a standalone class — detected via the `controller`/`command` stereotype, 2 or fewer fields, at least one method, excluding adapter/gateway/client-flavored clusters.",
+  "bounded-context":
+    "An explicit boundary within which a model's ubiquitous language stays consistent — detected as an L3 cluster meeting minimum size/vocabulary/distinctiveness thresholds (default 3+ members, 5+ distinct vocabulary terms, 0.4+ distinctiveness ratio).",
+};
 
 export const DOMAIN_CONCEPT_METADATA_SCHEMA: MetadataSchema = {
   type: "object",
@@ -36,6 +57,7 @@ export const DOMAIN_CONCEPT_METADATA_SCHEMA: MetadataSchema = {
     conceptKind: {
       type: "string",
       enum: ["entity", "value-object", "aggregate-root", "domain-service", "bounded-context"],
+      enumDescriptions: CONCEPT_KIND_DESCRIPTIONS,
       title: "DDD concept kind",
     },
     name: {
