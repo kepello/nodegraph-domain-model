@@ -5,22 +5,14 @@
  * changes if any of those shift.
  */
 
-import { createHash } from "node:crypto";
-
-const SHORT_HASH_LENGTH = 16;
+import { shortContentHash } from "@kepello/nodegraph-core";
 
 export function computeConceptId(
   conceptKind: string,
   name: string,
   clusterId?: string,
 ): string {
-  const hasher = createHash("sha256");
-  hasher.update(conceptKind);
-  hasher.update("\n");
-  hasher.update(name);
-  if (clusterId !== undefined) {
-    hasher.update("\n");
-    hasher.update(clusterId);
-  }
-  return hasher.digest("hex").slice(0, SHORT_HASH_LENGTH);
+  return shortContentHash(
+    clusterId !== undefined ? [conceptKind, name, clusterId] : [conceptKind, name],
+  );
 }

@@ -2,6 +2,19 @@
 
 All notable changes to `@kepello/nodegraph-domain-model`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.17.0] — 2026-07-10
+
+`computeConceptId` migrated onto `@kepello/nodegraph-core`'s shared `shortContentHash` helper. Step 2 of Fathom row `0.3.2.f8` (identity-hash-helper-consolidation). Behavior-preserving — golden-pinned; no id change → no downstream cache concern from this package.
+
+### Changed
+
+- `computeConceptId` now calls `shortContentHash(clusterId !== undefined ? [conceptKind, name, clusterId] : [conceptKind, name])` instead of hand-rolling the sha256-then-slice(0,16) assembly (positional parts, no sort). Local `SHORT_HASH_LENGTH` const removed.
+- Peer dependency on `@kepello/nodegraph-core` retargeted `^5.7.1` → `^5.12.0` (introduces `shortContentHash`).
+
+### Tests
+
+- New `src/identity.test.ts` (none previously existed) — 2 golden-pin regression tests: fixed inputs with and without `clusterId` assert the exact pre-migration literals `da42df2c325125d1` and `da538e6c4aae4cd1`. Captured green against the un-migrated code, stayed green after the migration — byte-identity confirmed. 87/87 tests pass (was 85).
+
 ## [0.16.0] — 2026-07-06
 
 **`conceptKind` gains a curated, documented value catalog in the metadata schema.** The inspector's `enum` → chip-rendering consumer (`@kepello/nodegraph-core` `MetadataSchemaProperty`) had a bare list of five strings with no explanation of what each one means; an operator staring at a `bounded-context` chip had no way to learn what fired it without reading `detectors.ts`.
