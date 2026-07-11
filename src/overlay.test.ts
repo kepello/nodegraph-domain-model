@@ -172,6 +172,38 @@ test("setEnrichment — preserves realizedBy edges and writes llmEnrichment (Fat
   assert.equal(enriched?.displayName, "User Management");
 });
 
+test("insertConcept — persists distinctiveness + dominanceSupport observable-support fields (3.3.12)", () => {
+  // Fathom row 3.3.12 (overlay-confidence-honest-null-policy): the
+  // bounded-context / aggregate-root confidence-saturation fix
+  // persists `distinctiveness` / `dominanceSupport` as observable
+  // support signals alongside the (still-clamped) confidenceScore —
+  // without them, two concepts saturating at the same confidenceScore
+  // are indistinguishable once persisted.
+  const graph = makeGraph();
+  const overlay = makeDomainModelOverlay(graph);
+  const bc = overlay.insertConcept({
+    conceptId: "bc-1",
+    conceptKind: "bounded-context",
+    name: "orders",
+    confidenceScore: 0.9,
+    contentHash: "h-bc",
+    realizedByElementIds: ["OrderService"],
+    distinctiveness: 0.6,
+  });
+  assert.equal(bc.metadata.distinctiveness, 0.6);
+
+  const ar = overlay.insertConcept({
+    conceptId: "ar-1",
+    conceptKind: "aggregate-root",
+    name: "Order",
+    confidenceScore: 0.9,
+    contentHash: "h-ar",
+    realizedByElementIds: ["Order"],
+    dominanceSupport: 1,
+  });
+  assert.equal(ar.metadata.dominanceSupport, 1);
+});
+
 test("renameConcept — throws on unknown conceptId", () => {
   const graph = makeGraph();
   const overlay = makeDomainModelOverlay(graph);

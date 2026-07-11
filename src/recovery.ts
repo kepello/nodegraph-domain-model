@@ -130,6 +130,15 @@ export function recoverDomainModel(
         : {}),
       // Language stays only when the merged halves agree.
       ...(prior.language === c.language ? {} : { language: undefined }),
+      // Fathom row 3.3.12: observable-support fields — keep the
+      // higher-support reading on collision (same shape as the
+      // confidenceScore max above; a merge should never LOSE evidence).
+      ...(prior.distinctiveness !== undefined || c.distinctiveness !== undefined
+        ? { distinctiveness: Math.max(prior.distinctiveness ?? 0, c.distinctiveness ?? 0) }
+        : {}),
+      ...(prior.dominanceSupport !== undefined || c.dominanceSupport !== undefined
+        ? { dominanceSupport: Math.max(prior.dominanceSupport ?? 0, c.dominanceSupport ?? 0) }
+        : {}),
     });
   }
   const filtered = [...byConceptId.values()];

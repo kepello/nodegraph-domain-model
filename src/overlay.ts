@@ -339,6 +339,13 @@ function buildMetadata(input: DomainConceptInput): DomainConceptMetadata {
   if (input.displayName !== undefined) meta.displayName = input.displayName;
   if (input.clusterId !== undefined) meta.clusterId = input.clusterId;
   if (input.language !== undefined) meta.language = input.language;
+  // Fathom row 3.3.12 (overlay-confidence-honest-null-policy):
+  // observable-support fields — persisted only when the caller
+  // actually computed one (bounded-context / aggregate-root
+  // respectively); absent for every other conceptKind, same
+  // caller-opt-in shape as displayName/clusterId/language above.
+  if (input.distinctiveness !== undefined) meta.distinctiveness = input.distinctiveness;
+  if (input.dominanceSupport !== undefined) meta.dominanceSupport = input.dominanceSupport;
   return meta;
 }
 

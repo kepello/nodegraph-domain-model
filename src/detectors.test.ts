@@ -331,6 +331,11 @@ test("detectAggregateRoots — fires on entity with the most inbound refs in clu
   const out = detectAggregateRoots(ctx, entities);
   assert.equal(out.length, 1);
   assert.equal(out[0].name, "Order");
+  // 3.3.12 (overlay-confidence-honest-null-policy): dominance is
+  // support-unweighted — 2 total same-cluster inbound refs back this
+  // dominance=1.0 read. dominanceSupport makes that evidence count
+  // observable instead of silently absorbing it into the 0.9 cap.
+  assert.equal(out[0].dominanceSupport, 2);
 });
 
 test("detectAggregateRoots — doesn't fire when cluster has only one entity", () => {
@@ -341,6 +346,93 @@ test("detectAggregateRoots — doesn't fire when cluster has only one entity", (
   });
   const entities = detectEntities(ctx);
   assert.equal(detectAggregateRoots(ctx, entities).length, 0);
+});
+
+// Fathom row 3.3.12 (overlay-confidence-honest-null-policy) — the
+// aggregate-root confidence site. `dominance = best.count / totalRefs`
+// is support-unweighted: a `totalRefs === 1` cluster (a single
+// same-cluster entity-to-entity reference, anywhere) forces
+// dominance === 1.0 exactly like a cluster backed by dozens of
+// references — the pre-fix 0.9-capped score was silently identical in
+// both cases. `dominanceSupport` (= totalRefs) makes the evidence
+// count observable so a 0.9-from-1-edge read is distinguishable from
+// a 0.9-from-many read, without changing the numeric confidenceScore
+// (support-aware persisted field, not a score reweight — see
+// CHANGELOG for the rationale).
+test("detectAggregateRoots — single-edge dominance is flagged low-support via dominanceSupport (3.3.12)", () => {
+  // A single same-cluster entity-to-entity reference anywhere in the
+  // cluster: B → A. totalRefs = 1, best.count = 1, dominance = 1.0 —
+  // forced exactly like the many-edge case below, but on one data point.
+  const ctx = buildContext({
+    elements: [
+      { id: "A", name: "A", kind: "class" },
+      { id: "B", name: "B", kind: "class" },
+    ],
+    classStereotypes: new Map([
+      ["A", "entity"],
+      ["B", "entity"],
+    ]),
+    referencesEdges: [{ source: "B", target: "A" }],
+    clusterByElement: new Map([
+      ["A", "c1"],
+      ["B", "c1"],
+    ]),
+  });
+  const entities = detectEntities(ctx);
+  const out = detectAggregateRoots(ctx, entities);
+  assert.equal(out.length, 1);
+  // 0.6 + 1.0*0.3 lands on the well-known IEEE754 double artifact
+  // (0.8999999999999999, not 0.9) — pre-existing to this fix and out
+  // of the confidence-scoring-policy scope; tolerant comparison.
+  assert.ok(Math.abs(out[0].confidenceScore - 0.9) < 1e-9);
+  assert.equal(out[0].dominanceSupport, 1);
+});
+
+test("detectAggregateRoots — dominanceSupport distinguishes 0.9-from-one-edge from 0.9-from-many (3.3.12)", () => {
+  // Root gets 5 inbound same-cluster references from 5 distinct
+  // entities. dominance is still exactly 1.0 (best.count === totalRefs,
+  // same as the single-edge fixture above) and confidenceScore is
+  // identically capped at 0.9 — but dominanceSupport (5 vs 1) is the
+  // observable signal a consumer needs to rank this read as
+  // higher-evidence than the single-edge case.
+  const ctx = buildContext({
+    elements: [
+      { id: "Root", name: "Root", kind: "class" },
+      { id: "R1", name: "R1", kind: "class" },
+      { id: "R2", name: "R2", kind: "class" },
+      { id: "R3", name: "R3", kind: "class" },
+      { id: "R4", name: "R4", kind: "class" },
+      { id: "R5", name: "R5", kind: "class" },
+    ],
+    classStereotypes: new Map([
+      ["Root", "entity"],
+      ["R1", "entity"],
+      ["R2", "entity"],
+      ["R3", "entity"],
+      ["R4", "entity"],
+      ["R5", "entity"],
+    ]),
+    referencesEdges: [
+      { source: "R1", target: "Root" },
+      { source: "R2", target: "Root" },
+      { source: "R3", target: "Root" },
+      { source: "R4", target: "Root" },
+      { source: "R5", target: "Root" },
+    ],
+    clusterByElement: new Map([
+      ["Root", "c1"],
+      ["R1", "c1"],
+      ["R2", "c1"],
+      ["R3", "c1"],
+      ["R4", "c1"],
+      ["R5", "c1"],
+    ]),
+  });
+  const entities = detectEntities(ctx);
+  const out = detectAggregateRoots(ctx, entities);
+  assert.equal(out.length, 1);
+  assert.ok(Math.abs(out[0].confidenceScore - 0.9) < 1e-9);
+  assert.equal(out[0].dominanceSupport, 5);
 });
 
 // --- detectDomainServices -------------------------------------------------
@@ -414,6 +506,80 @@ test("detectBoundedContexts — fires on cluster with ≥3 members + distinct vo
   const orders = out.find((c) => c.clusterId === "orders");
   assert.ok(orders);
   assert.equal(orders.conceptKind, "bounded-context");
+  // Fathom row 3.3.12 (overlay-confidence-honest-null-policy): pre-fix
+  // this cluster (distinctiveness=1.0, ≥5 members) landed at a forced
+  // confidenceScore of exactly 1.0 via the dead `layerOk` +0.1 — 35/39
+  // live bounded-contexts measured at that mass point. Post-fix the
+  // ceiling is 0.9 (layerOk deleted, no real signal ever backed it),
+  // and the raw `distinctiveness` that drives the saturation is
+  // persisted as an observable support field.
+  assert.equal(orders.confidenceScore, 0.9);
+  assert.equal(orders.distinctiveness, 1);
+});
+
+// Fathom row 3.3.12 (overlay-confidence-honest-null-policy) — the
+// bounded-context confidence site. `Math.min(1, 0.5 + min(0.3,
+// distinctiveness*0.5) + 0.1[layerOk, dead] + 0.1[size])` forces ANY
+// cluster with distinctiveness ≥ 0.6 and ≥ 5 members to the exact same
+// confidenceScore, whether distinctiveness is 0.6 (barely cleared) or
+// 1.0 (maximally distinctive) — a forced mass point at the ceiling.
+// `distinctiveness` is now persisted alongside confidenceScore so two
+// clusters that saturate identically are still distinguishable by
+// their real evidence.
+test("detectBoundedContexts — distinctiveness support field distinguishes two clusters saturating at the same confidenceScore (3.3.12)", () => {
+  const ctx = buildContext({
+    elements: [
+      // clusterA: 5 distinct terms, 2 of which (shareone/sharetwo) also
+      // appear in clusterFiller — distinctiveness = 3/5 = 0.6, exactly
+      // at the saturation threshold.
+      { id: "a1", name: "Alpha", kind: "class" },
+      { id: "a2", name: "Beta", kind: "class" },
+      { id: "a3", name: "Gamma", kind: "class" },
+      { id: "a4", name: "Shareone", kind: "class" },
+      { id: "a5", name: "Sharetwo", kind: "class" },
+      // clusterB: fully distinct vocabulary — distinctiveness = 1.0.
+      { id: "b1", name: "OrderService", kind: "class" },
+      { id: "b2", name: "OrderRepository", kind: "class" },
+      { id: "b3", name: "OrderItem", kind: "class" },
+      { id: "b4", name: "OrderCheckout", kind: "class" },
+      { id: "b5", name: "OrderConfirmation", kind: "class" },
+      // clusterFiller: not a bounded-context candidate (omitted from
+      // ctx.clusters below) — exists only to raise shareone/sharetwo's
+      // document frequency to 2, pulling clusterA's distinctiveness
+      // down to exactly 0.6.
+      { id: "f1", name: "Shareone", kind: "class" },
+      { id: "f2", name: "Sharetwo", kind: "class" },
+    ],
+    clusters: [
+      { clusterId: "clusterA", name: "clusterA", memberCount: 5 },
+      { clusterId: "clusterB", name: "clusterB", memberCount: 5 },
+    ],
+    clusterByElement: new Map([
+      ["a1", "clusterA"],
+      ["a2", "clusterA"],
+      ["a3", "clusterA"],
+      ["a4", "clusterA"],
+      ["a5", "clusterA"],
+      ["b1", "clusterB"],
+      ["b2", "clusterB"],
+      ["b3", "clusterB"],
+      ["b4", "clusterB"],
+      ["b5", "clusterB"],
+      ["f1", "clusterFiller"],
+      ["f2", "clusterFiller"],
+    ]),
+  });
+  const out = detectBoundedContexts(ctx);
+  const clusterA = out.find((c) => c.clusterId === "clusterA");
+  const clusterB = out.find((c) => c.clusterId === "clusterB");
+  assert.ok(clusterA);
+  assert.ok(clusterB);
+  // Same clamped score...
+  assert.equal(clusterA.confidenceScore, 0.9);
+  assert.equal(clusterB.confidenceScore, 0.9);
+  // ...but distinguishable real evidence.
+  assert.equal(clusterA.distinctiveness, 0.6);
+  assert.equal(clusterB.distinctiveness, 1);
 });
 
 test("detectBoundedContexts — doesn't fire on cluster below minClusterSize", () => {

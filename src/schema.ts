@@ -90,6 +90,18 @@ export const DOMAIN_CONCEPT_METADATA_SCHEMA: MetadataSchema = {
       description:
         "Heuristic rank ∈ [0, 1]. Threshold via `domainModel.minConfidence` (default 0.6).",
     },
+    distinctiveness: {
+      type: "number",
+      title: "Bounded-context vocabulary distinctiveness (observable-support field)",
+      description:
+        "`bounded-context` only. Fathom row 3.3.12 (overlay-confidence-honest-null-policy): raw (unclamped) TF-IDF vocabulary-distinctiveness ratio ∈ [0, 1] feeding confidenceScore's saturating term — persisted so two bounded-contexts that saturate at the same confidenceScore stay distinguishable by their real evidence. Absent for every other conceptKind.",
+    },
+    dominanceSupport: {
+      type: "number",
+      title: "Aggregate-root reference-count support (observable-support field)",
+      description:
+        "`aggregate-root` only. Fathom row 3.3.12 (overlay-confidence-honest-null-policy): total same-cluster entity-to-entity inbound references the winning entity's dominance ratio was computed over — a totalRefs=1 read is low-evidence in a way confidenceScore alone can't express. Absent for every other conceptKind.",
+    },
   },
 };
 

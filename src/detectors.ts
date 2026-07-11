@@ -21,6 +21,31 @@ export interface ComputedConcept {
   realizedByElementIds: readonly string[];
   containsConceptNames?: readonly string[];
   relatedToConceptNames?: readonly string[];
+  /**
+   * `bounded-context` only. Fathom row 3.3.12
+   * (overlay-confidence-honest-null-policy): raw (unclamped) TF-IDF
+   * vocabulary-distinctiveness ratio ∈ [0, 1] that feeds
+   * `confidenceScore`'s saturating `min(0.3, distinctiveness*0.5)`
+   * term. `confidenceScore` alone can't distinguish a cluster that
+   * barely cleared the 0.6 saturation threshold from one at 1.0 — both
+   * land on the same clamped score. This is the observable-support
+   * signal that makes the ceiling legible instead of a silent mass
+   * point.
+   */
+  distinctiveness?: number;
+  /**
+   * `aggregate-root` only. Fathom row 3.3.12
+   * (overlay-confidence-honest-null-policy): total same-cluster
+   * entity-to-entity inbound references the winning entity's dominance
+   * ratio was computed over (`totalRefs`). `dominance =
+   * best.count / totalRefs` is support-unweighted — a `totalRefs === 1`
+   * cluster (a single reference, anywhere) forces dominance === 1.0
+   * exactly like a cluster backed by dozens of references, and
+   * `confidenceScore` alone can't tell them apart. `dominanceSupport`
+   * makes a 0.9-from-1-edge read distinguishable from a
+   * 0.9-from-many read.
+   */
+  dominanceSupport?: number;
 }
 
 const CLASS_KINDS: ReadonlySet<string> = new Set(["class", "struct"]);
@@ -448,6 +473,9 @@ export function detectAggregateRoots(
       language: best.concept.language,
       confidenceScore: score,
       realizedByElementIds: best.concept.realizedByElementIds,
+      // Fathom row 3.3.12: support-aware observable field — see
+      // ComputedConcept.dominanceSupport's doc comment.
+      dominanceSupport: totalRefs,
     });
   }
   return out;
@@ -501,9 +529,8 @@ export function detectDomainServices(ctx: DomainContext): ComputedConcept[] {
 /**
  * Bounded context — L3 cluster with ≥ `minClusterSize` members
  * (default 3), ≥ `minVocabularySize` distinct identifier terms
- * (default 5), uniform layer assignment when L4 has run, and
- * distinctive identifier vocabulary (the cluster has terms not
- * widely present in other clusters; default ratio ≥ 0.4).
+ * (default 5), and distinctive identifier vocabulary (the cluster has
+ * terms not widely present in other clusters; default ratio ≥ 0.4).
  *
  * Returns one `bounded-context` concept per qualifying cluster.
  *
@@ -514,6 +541,18 @@ export function detectDomainServices(ctx: DomainContext): ComputedConcept[] {
  * no minimum-vocabulary floor existed. New defaults: distinctiveness
  * ≥ 0.4 + ≥ 5 distinct terms. Both are configurable for downstream
  * workloads.
+ *
+ * No layer-integrity check (Fathom row 3.3.12,
+ * overlay-confidence-honest-null-policy): a prior `layerOk` gate
+ * documented "uniform layer assignment when L4 has run" but
+ * `DomainContext.layerByCluster` is one layer number PER CLUSTER, not
+ * per member — there is no per-member data this function could ever
+ * compare, so the gate was structurally unable to fail. It initialized
+ * `true` and was never set `false`, silently contributing a constant
+ * +0.1 to every score as if it were a real signal. Deleted outright
+ * rather than implemented: a real per-member layer-integrity check
+ * would require widening `DomainContext` to carry per-element layer
+ * assignments, which is out of scope for a confidence-scoring fix.
  */
 export function detectBoundedContexts(
   ctx: DomainContext,
@@ -562,16 +601,6 @@ export function detectBoundedContexts(
     const members = elementsByCluster.get(cluster.clusterId) ?? [];
     if (members.length < minSize) continue;
 
-    // Layer integrity: when L4 has run, the cluster must have a single
-    // layer assignment; if any member is in a different cluster's layer
-    // we skip the check (cluster-level — applies to the cluster itself).
-    const layer = ctx.layerByCluster.get(cluster.clusterId);
-    let layerOk = true; // default to OK when L4 absent
-    if (layer === undefined && ctx.layerByCluster.size > 0) {
-      // L4 has run somewhere but not this cluster — treat as OK.
-      layerOk = true;
-    }
-
     // Vocabulary distinctiveness: ratio of cluster-unique terms.
     const tf = termFreqByCluster.get(cluster.clusterId) ?? new Map();
     if (tf.size < minVocab) continue;
@@ -583,9 +612,15 @@ export function detectBoundedContexts(
     const distinctiveness = tf.size === 0 ? 0 : uniqueTerms / tf.size;
     if (distinctiveness < minDistinctiveness) continue;
 
+    // confidenceScore's ceiling is now 0.9 (was 1.0 pre-3.3.12; the
+    // deleted layerOk gate contributed a constant, unearned +0.1). The
+    // distinctiveness term itself still saturates at distinctiveness ≥
+    // 0.6 (min(0.3, distinctiveness*0.5)) — any cluster clearing that
+    // floor with ≥5 members lands on the same 0.9. `distinctiveness`
+    // is persisted below as the observable-support field that keeps
+    // that mass point legible (Fathom row 3.3.12).
     let score = 0.5;
     score += Math.min(0.3, distinctiveness * 0.5);
-    if (layerOk) score += 0.1;
     if (members.length >= 5) score += 0.1;
 
     // Fathom row 5.1.5.1: filter realizedBy to high-signal kinds so
@@ -617,8 +652,14 @@ export function detectBoundedContexts(
       name: cluster.displayName ?? cluster.name,
       clusterId: cluster.clusterId,
       language: uniformLanguage(members),
-      confidenceScore: Math.min(1, score),
+      // No `Math.min(1, ...)` clamp: the formula's max attainable value
+      // is 0.5 + 0.3 + 0.1 = 0.9 (layerOk's constant +0.1 removed —
+      // Fathom row 3.3.12), so a clamp against 1 is now always a no-op.
+      confidenceScore: score,
       realizedByElementIds: realizedBy.map((m) => m.id),
+      // Fathom row 3.3.12: support-aware observable field — see
+      // ComputedConcept.distinctiveness's doc comment.
+      distinctiveness,
     });
   }
   return out;

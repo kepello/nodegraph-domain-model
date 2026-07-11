@@ -50,6 +50,16 @@ export interface DomainContext {
   clusters: readonly DomainClusterInfo[];
   /** Element id → cluster id. */
   clusterByElement: ReadonlyMap<string, string>;
-  /** L4 layer number per cluster (optional; degrades gracefully when absent). */
+  /**
+   * L4 layer number per cluster (optional; degrades gracefully when
+   * absent). Currently unconsumed by any detector (Fathom row 3.3.12,
+   * overlay-confidence-honest-null-policy): `detectBoundedContexts`'s
+   * former `layerOk` gate read this but was a dead constant — one
+   * layer number PER CLUSTER can never express "any member is in a
+   * different layer," so the gate could never fail. Kept in the
+   * contract as the input a future real per-member layer-integrity
+   * check would need (widening `DomainContext` with per-element layer
+   * data), not removed speculatively.
+   */
   layerByCluster: ReadonlyMap<string, number>;
 }

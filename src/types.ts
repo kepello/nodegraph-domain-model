@@ -38,6 +38,22 @@ export interface DomainConceptMetadata {
   language?: string;
   confidenceScore: number;
   /**
+   * `bounded-context` only. Fathom row 3.3.12
+   * (overlay-confidence-honest-null-policy): observable-support field
+   * — the raw (unclamped) vocabulary-distinctiveness ratio that feeds
+   * `confidenceScore`'s saturating term. See `ComputedConcept
+   * .distinctiveness` (detectors.ts) for the full rationale.
+   */
+  distinctiveness?: number;
+  /**
+   * `aggregate-root` only. Fathom row 3.3.12
+   * (overlay-confidence-honest-null-policy): observable-support field
+   * — total same-cluster entity-to-entity inbound references the
+   * dominance ratio was computed over. See `ComputedConcept
+   * .dominanceSupport` (detectors.ts) for the full rationale.
+   */
+  dominanceSupport?: number;
+  /**
    * LLM-supplied enrichment (Haiku-namer pipeline output). Persisted
    * via `DomainModelOverlay.setEnrichment` — never write directly via
    * `graph.supersedeNode` (Fathom row 5.0.39).
@@ -58,6 +74,10 @@ export interface DomainConceptInput {
   clusterId?: string;
   language?: string;
   confidenceScore: number;
+  /** `bounded-context` only — see `DomainConceptMetadata.distinctiveness`. */
+  distinctiveness?: number;
+  /** `aggregate-root` only — see `DomainConceptMetadata.dominanceSupport`. */
+  dominanceSupport?: number;
   contentHash: string;
   /** L0 elements (classes/methods/etc.) implementing this concept — `realizedBy` edge targets. */
   realizedByElementIds: readonly string[];
