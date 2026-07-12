@@ -224,7 +224,7 @@ function fieldChildren(ctx: DomainContext, classId: string): DomainElement[] {
 /**
  * Entity — two paths:
  *
- *  - Classic: class / struct with L1 classStereotype `entity`.
+ *  - Classic: class / struct with L1 `classRole` `entity-candidate`.
  *  - TS / interface-shaped (Fathom 5.0.26 c): interface or type-alias
  *    with ≥ 3 field-shaped properties AND ≥ 1 implementor (inbound
  *    `extends`/`implements` edge) AND the name doesn't look like an
@@ -242,34 +242,41 @@ export function detectEntities(ctx: DomainContext): ComputedConcept[] {
   const out: ComputedConcept[] = [];
   const seenIds = new Set<string>();
 
-  // Path 1 — classic class-stereotype entity OR large-class with
-  // entity-shape (Fathom row 5.0.36). The L1 stereotype rule cascade
-  // assigns `large-class` BEFORE `entity` (anti-pattern signal wins on
-  // structural overload — methodCount > 20 or loc > 500). A class can
-  // be both a god-class AND an entity: the anti-pattern stereotype
-  // describes WHAT IT IS (oversized), the conceptKind describes WHAT IT
-  // MODELS (a mutable domain object). Surfacing large-class as entity
-  // doesn't suppress the anti-pattern signal — detection + ratings +
-  // L6 patterns continue to flag the god-class separately.
+  // Path 1 — `classRole` gate. Fathom row l7b-stereotype-vocabulary-drift
+  // (3.3.11): admission reads the engine-owned `classRole` projection
+  // (`entity-candidate`), never raw `classStereotype` — matching raw
+  // stereotype values is the drift class this fix closes (a consumer's
+  // admit-list silently stranding whenever the stereotype vocabulary
+  // expands). `classRole` already folds in BOTH the classic `entity`
+  // stereotype AND `large-class` (Fathom row 5.0.36 — the L1 stereotype
+  // rule cascade assigns `large-class` BEFORE `entity` on structural
+  // overload, but a class can be both a god-class AND an entity: the
+  // anti-pattern stereotype describes WHAT IT IS, the conceptKind
+  // describes WHAT IT MODELS).
   //
-  // Entity-shape predicate (matches the L1 entity rule's structural
-  // floor): ≥ 3 fields AND ≥ 3 method children. Confidence is dropped
-  // by 0.1 for the large-class path to encode the secondary-match
-  // signal — consumers can rank pure entities above god-class entities.
+  // SANCTIONED DELTA (3.3.11 entity-gate tightening): the hand-rolled
+  // entity-shape recount that used to live here (`fields.length>=3 &&
+  // methods.length>=3`, counting every method-like child) is DELETED —
+  // that gate now lives OWNER-side in the `classRole` derivation, and is
+  // DELIBERATELY TIGHTER (it excludes constructors/destructors and
+  // syntactic accessors from the "behavior" method count that the old
+  // hand gate counted indiscriminately). The entity population may
+  // shift as a result — that tightening is correct ("state + behavior"
+  // shouldn't count ctors/getters as behavior), not a regression to
+  // fight.
   for (const cls of classes(ctx)) {
-    const stereo = ctx.classStereotypes.get(cls.id);
-    if (stereo !== "entity" && stereo !== "large-class") continue;
+    if (ctx.classRoles.get(cls.id) !== "entity-candidate") continue;
     if (isFixturePath(cls)) continue;
     if (isHelperModule(cls)) continue; // Fathom 5.0.43 / round-8 F6
     if (OPTION_BAG_SUFFIX_RE.test(cls.name)) continue;
     const fields = fieldChildren(ctx, cls.id);
-    const methods = methodChildren(ctx, cls.id);
-    // Entity-shape gate (applied to both stereotypes — `entity` keeps
-    // its own ≥1-field signal via the score-boost below; the gate here
-    // only filters large-classes that lack structural-entity shape).
-    if (stereo === "large-class" && (fields.length < 3 || methods.length < 3)) {
-      continue;
-    }
+    // `stereo` is read here ONLY to pick the score bonus between the
+    // classic `entity` case (0.7) and the `large-class` secondary-match
+    // case (0.6, so consumers can rank pure entities above god-class
+    // entities) — confidence scoring is unchanged by this row (Fathom
+    // row 3.3.12 fixed confidence-saturation separately); it is NOT
+    // used for admission (that's the classRole gate above).
+    const stereo = ctx.classStereotypes.get(cls.id);
     let score = stereo === "large-class" ? 0.6 : 0.7;
     if (fields.length >= 1) score += 0.1;
     if (fields.length >= 3) score += 0.05;
@@ -328,8 +335,8 @@ export function detectEntities(ctx: DomainContext): ComputedConcept[] {
 /**
  * Value object — two paths:
  *
- *  - Classic: class / struct with L1 classStereotype `data-class` AND
- *    no mutator-shaped method children.
+ *  - Classic: class / struct with L1 `classRole` `data-holder` AND no
+ *    `mutator` `methodRole` child.
  *  - TS / interface-shaped (Fathom 5.0.17): interface or type-alias
  *    with ≥ 2 field-shaped properties and no method children. TS
  *    expresses many domain value objects as interfaces (no methods,
@@ -344,16 +351,28 @@ export function detectValueObjects(ctx: DomainContext): ComputedConcept[] {
   const out: ComputedConcept[] = [];
   const seenIds = new Set<string>();
 
-  // Path 1 — classic data-class.
+  // Path 1 — `classRole` gate. Fathom row l7b-stereotype-vocabulary-drift
+  // (3.3.11): admission reads `classRole` (`data-holder`), never raw
+  // `classStereotype` — same drift-class fix as `detectEntities` above.
+  // The mutator rejection likewise reads `methodRole` (`mutator`)
+  // instead of the raw `methodStereotype` string `"mutator-shaped"`.
+  //
+  // SANCTIONED DELTA (3.3.11, 2nd live drift fix, +VO rejections):
+  // `methodRole` maps BOTH the heuristic `mutator-shaped` AND the S4
+  // fact-confirmed `mutator` stereotype to the same `"mutator"` role.
+  // The pre-migration code matched the literal string `"mutator-shaped"`
+  // only, so a data-class with a fact-confirmed mutator was silently
+  // ADMITTED as a value-object — reading `methodRole` closes that gap
+  // for free; value-objects with real mutators now correctly stop being
+  // admitted.
   for (const cls of classes(ctx)) {
-    const stereo = ctx.classStereotypes.get(cls.id);
-    if (stereo !== "data-class") continue;
+    if (ctx.classRoles.get(cls.id) !== "data-holder") continue;
     if (isFixturePath(cls)) continue;
     if (isHelperModule(cls)) continue; // Fathom 5.0.43 / round-8 F6
     if (OPTION_BAG_SUFFIX_RE.test(cls.name)) continue;
     const methods = methodChildren(ctx, cls.id);
     const hasMutator = methods.some(
-      (m) => ctx.methodStereotypes.get(m.id) === "mutator-shaped",
+      (m) => ctx.methodRoles.get(m.id) === "mutator",
     );
     if (hasMutator) continue;
     const fields = fieldChildren(ctx, cls.id);
@@ -482,15 +501,30 @@ export function detectAggregateRoots(
 }
 
 /**
- * Domain service — class with L1 classStereotype `controller` or
- * `command`, few/no field children (≤ 2), and a non-adapter cluster
- * (best-effort: avoid clusters named like "adapter"/"gateway").
+ * Domain service — class with L1 `classRole` `service` or
+ * `command-object`, few/no field children (≤ 2), and a non-adapter
+ * cluster (best-effort: avoid clusters named like "adapter"/"gateway").
+ *
+ * Fathom row l7b-stereotype-vocabulary-drift (3.3.11): admission reads
+ * `classRole`, never raw `classStereotype` — same drift-class fix as
+ * `detectEntities`/`detectValueObjects` above. `classRole` is checked
+ * against BOTH `service` and `command-object` because the owner-side
+ * projection deliberately keeps them distinct (a GoF Command class vs. a
+ * controller/service-class workhorse) rather than collapsing them into
+ * one orchestration bucket — domain-service detection reads both.
+ *
+ * SANCTIONED DELTA (3.3.11, the live drift fix, +domain-services):
+ * `classRole "service"` also admits the `service-class` stereotype
+ * (every `*Service`/`*Server`/`*Impl`/`*Store` heuristic name-match),
+ * which was NEVER in the pre-migration raw admit-set
+ * (`classStereotype ∈ {controller, command}` only) — domain-services
+ * go from 0 corpus-wide to >0.
  */
 export function detectDomainServices(ctx: DomainContext): ComputedConcept[] {
   const out: ComputedConcept[] = [];
   for (const cls of classes(ctx)) {
-    const stereo = ctx.classStereotypes.get(cls.id);
-    if (stereo !== "controller" && stereo !== "command") continue;
+    const role = ctx.classRoles.get(cls.id);
+    if (role !== "service" && role !== "command-object") continue;
     // Fathom 5.0.26 (b): reject fixture/test-pathed classes — round-5
     // F9 caught `app` + `crosslangfixturestests` (C# conformance
     // fixtures) being misidentified as domain-services.

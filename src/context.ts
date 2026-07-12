@@ -38,6 +38,27 @@ export interface DomainContext {
   classStereotypes: ReadonlyMap<string, string>;
   /** L1 method stereotypes (`accessor-shaped`, `mutator-shaped`, `controller`, etc.). */
   methodStereotypes: ReadonlyMap<string, string>;
+  /**
+   * L1 `classRole` — the engine-owned semantic-role projection of
+   * `classStereotype` (`@kepello/nodegraph-analysis` `ClassRole`:
+   * `service` | `command-object` | `entity-candidate` | `data-holder` |
+   * `boundary` | `error` | `utility` | `abstract-base` | `other`).
+   * Fathom row `l7b-stereotype-vocabulary-drift` (3.3.11): detectors
+   * MUST match on this projection, never on raw `classStereotype`
+   * values — matching raw stereotypes silently strands whenever the
+   * vocabulary expands (the drift class this contract closes). Plain
+   * data (string), same shape as `classStereotypes` — no peer-dep on
+   * `@kepello/nodegraph-analysis`.
+   */
+  classRoles: ReadonlyMap<string, string>;
+  /**
+   * L1 `methodRole` — the semantic-role projection of `methodStereotype`
+   * (`@kepello/nodegraph-analysis` `MethodRole`: `entry-command` |
+   * `mutator` | `factory` | `accessor` | `test-fixture` | `other`). See
+   * `classRoles` above for the drift class this closes; same
+   * plain-data, no-peer-dep shape.
+   */
+  methodRoles: ReadonlyMap<string, string>;
   /** Container → children ids (class → method/field children). */
   childrenOf: ReadonlyMap<string, readonly string[]>;
   /** Inverse of `childrenOf`. */

@@ -18,6 +18,8 @@ function emptyContext(): DomainContext {
     elements: [],
     classStereotypes: new Map(),
     methodStereotypes: new Map(),
+    classRoles: new Map(),
+    methodRoles: new Map(),
     childrenOf: new Map(),
     parentOf: new Map(),
     referencesEdges: [],
@@ -38,6 +40,7 @@ test("recoverDomainModel — concepts carry conceptId", () => {
     ...emptyContext(),
     elements: [{ id: "User", name: "User", kind: "class" }],
     classStereotypes: new Map([["User", "entity"]]),
+    classRoles: new Map([["User", "entity-candidate"]]),
   };
   const result = recoverDomainModel({ context: ctx });
   for (const c of result.concepts) {
@@ -51,6 +54,7 @@ test("recoverDomainModel — threshold filter drops low-confidence", () => {
     ...emptyContext(),
     elements: [{ id: "Foo", name: "Foo", kind: "class" }],
     classStereotypes: new Map([["Foo", "entity"]]),
+    classRoles: new Map([["Foo", "entity-candidate"]]),
   };
   // Entity confidence ~0.7 (no fields) → above default 0.6; passes.
   const baseline = recoverDomainModel({ context: ctx });
@@ -70,6 +74,10 @@ test("recoverDomainModel — rawCountsByKind reports per-kind raw counts", () =>
     classStereotypes: new Map([
       ["User", "entity"],
       ["Address", "data-class"],
+    ]),
+    classRoles: new Map([
+      ["User", "entity-candidate"],
+      ["Address", "data-holder"],
     ]),
   };
   const result = recoverDomainModel({ context: ctx });
@@ -153,6 +161,10 @@ test("recoverDomainModel — output sorted by descending confidence", () => {
       ["Rich", "entity"],
       ["Poor", "entity"],
     ]),
+    classRoles: new Map([
+      ["Rich", "entity-candidate"],
+      ["Poor", "entity-candidate"],
+    ]),
     childrenOf: new Map([["Rich", ["Rich.f1", "Rich.f2", "Rich.f3"]]]),
   };
   const result = recoverDomainModel({ context: ctx });
@@ -180,6 +192,10 @@ test("recoverDomainModel — REGRESSION 5.0.21.3: same-identity concepts MERGE (
     classStereotypes: new Map([
       ["ns1/User", "entity"],
       ["ns2/User", "entity"],
+    ]),
+    classRoles: new Map([
+      ["ns1/User", "entity-candidate"],
+      ["ns2/User", "entity-candidate"],
     ]),
   };
   const result = recoverDomainModel({ context: ctx });

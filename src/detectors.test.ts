@@ -23,6 +23,8 @@ interface Build {
   elements?: DomainElement[];
   classStereotypes?: ReadonlyMap<string, string>;
   methodStereotypes?: ReadonlyMap<string, string>;
+  classRoles?: ReadonlyMap<string, string>;
+  methodRoles?: ReadonlyMap<string, string>;
   childrenOf?: ReadonlyMap<string, readonly string[]>;
   parentOf?: ReadonlyMap<string, string>;
   referencesEdges?: DomainEdge[];
@@ -37,6 +39,8 @@ function buildContext(b: Build = {}): DomainContext {
     elements: b.elements ?? [],
     classStereotypes: b.classStereotypes ?? new Map(),
     methodStereotypes: b.methodStereotypes ?? new Map(),
+    classRoles: b.classRoles ?? new Map(),
+    methodRoles: b.methodRoles ?? new Map(),
     childrenOf: b.childrenOf ?? new Map(),
     parentOf: b.parentOf ?? new Map(),
     referencesEdges: b.referencesEdges ?? [],
@@ -49,7 +53,7 @@ function buildContext(b: Build = {}): DomainContext {
 
 // --- detectEntities -------------------------------------------------------
 
-test("detectEntities — fires on class with classStereotype 'entity'", () => {
+test("detectEntities — fires on class with classRole 'entity-candidate' (3.3.11)", () => {
   const ctx = buildContext({
     elements: [
       { id: "User", name: "User", kind: "class" },
@@ -57,6 +61,7 @@ test("detectEntities — fires on class with classStereotype 'entity'", () => {
       { id: "User.email", name: "email", kind: "field" },
     ],
     classStereotypes: new Map([["User", "entity"]]),
+    classRoles: new Map([["User", "entity-candidate"]]),
     childrenOf: new Map([["User", ["User.name", "User.email"]]]),
   });
   const out = detectEntities(ctx);
@@ -65,17 +70,40 @@ test("detectEntities — fires on class with classStereotype 'entity'", () => {
   assert.equal(out[0].conceptKind, "entity");
 });
 
-test("detectEntities — doesn't fire on non-entity stereotype", () => {
+test("detectEntities — doesn't fire on non-entity-candidate classRole", () => {
   const ctx = buildContext({
     elements: [{ id: "Foo", name: "Foo", kind: "class" }],
     classStereotypes: new Map([["Foo", "controller"]]),
+    classRoles: new Map([["Foo", "service"]]),
   });
   assert.equal(detectEntities(ctx).length, 0);
 });
 
+// Fathom row l7b-stereotype-vocabulary-drift (3.3.11) — root fix.
+// detectEntities must gate admission on `classRole`, never on raw
+// `classStereotype`. This fixture supplies ONLY `classRoles` (no
+// `classStereotypes` entry at all) — RED on the pre-migration code
+// (which reads `ctx.classStereotypes.get(cls.id)` and finds nothing),
+// GREEN once the gate reads `ctx.classRoles` instead.
+test("detectEntities — classRole alone (no classStereotype entry) is sufficient to admit (3.3.11 RED/GREEN)", () => {
+  const ctx = buildContext({
+    elements: [
+      { id: "Account", name: "Account", kind: "class" },
+      { id: "Account.id", name: "id", kind: "field" },
+      { id: "Account.balance", name: "balance", kind: "field" },
+    ],
+    classRoles: new Map([["Account", "entity-candidate"]]),
+    childrenOf: new Map([["Account", ["Account.id", "Account.balance"]]]),
+  });
+  const out = detectEntities(ctx);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].name, "Account");
+  assert.equal(out[0].conceptKind, "entity");
+});
+
 // --- detectValueObjects ---------------------------------------------------
 
-test("detectValueObjects — fires on data-class with no mutator-shaped methods", () => {
+test("detectValueObjects — fires on data-holder classRole with no mutator methodRole (3.3.11)", () => {
   const ctx = buildContext({
     elements: [
       { id: "Money", name: "Money", kind: "class" },
@@ -83,7 +111,9 @@ test("detectValueObjects — fires on data-class with no mutator-shaped methods"
       { id: "Money.getAmount", name: "getAmount", kind: "method" },
     ],
     classStereotypes: new Map([["Money", "data-class"]]),
+    classRoles: new Map([["Money", "data-holder"]]),
     methodStereotypes: new Map([["Money.getAmount", "accessor-shaped"]]),
+    methodRoles: new Map([["Money.getAmount", "accessor"]]),
     childrenOf: new Map([["Money", ["Money.amount", "Money.getAmount"]]]),
   });
   const out = detectValueObjects(ctx);
@@ -91,15 +121,43 @@ test("detectValueObjects — fires on data-class with no mutator-shaped methods"
   assert.equal(out[0].conceptKind, "value-object");
 });
 
-test("detectValueObjects — doesn't fire when data-class has a mutator method", () => {
+test("detectValueObjects — doesn't fire when data-holder has a mutator-shaped methodRole child", () => {
   const ctx = buildContext({
     elements: [
       { id: "M", name: "M", kind: "class" },
       { id: "M.setValue", name: "setValue", kind: "method" },
     ],
     classStereotypes: new Map([["M", "data-class"]]),
+    classRoles: new Map([["M", "data-holder"]]),
     methodStereotypes: new Map([["M.setValue", "mutator-shaped"]]),
+    methodRoles: new Map([["M.setValue", "mutator"]]),
     childrenOf: new Map([["M", ["M.setValue"]]]),
+  });
+  assert.equal(detectValueObjects(ctx).length, 0);
+});
+
+// Fathom row l7b-stereotype-vocabulary-drift (3.3.11) — SANCTIONED DELTA 2
+// (the second live drift fix): the S4 fact-confirmed `mutator` stereotype
+// (as opposed to the heuristic `mutator-shaped`) was NEVER checked by the
+// pre-migration code — it only matched the literal string
+// `"mutator-shaped"` — so a data-class with a fact-confirmed mutator was
+// silently ADMITTED as a value-object. `methodRole` maps BOTH `mutator`
+// and `mutator-shaped` to the same `"mutator"` role, so gating on
+// `methodRole` catches the previously-missed case for free. RED on the
+// pre-migration code (admits — length 1); GREEN post-migration (rejects
+// — length 0).
+test("detectValueObjects — fact-confirmed 'mutator' methodRole child rejects (3.3.11 RED/GREEN)", () => {
+  const ctx = buildContext({
+    elements: [
+      { id: "Ledger", name: "Ledger", kind: "class" },
+      { id: "Ledger.balance", name: "balance", kind: "field" },
+      { id: "Ledger.credit", name: "credit", kind: "method" },
+    ],
+    classStereotypes: new Map([["Ledger", "data-class"]]),
+    classRoles: new Map([["Ledger", "data-holder"]]),
+    methodStereotypes: new Map([["Ledger.credit", "mutator"]]),
+    methodRoles: new Map([["Ledger.credit", "mutator"]]),
+    childrenOf: new Map([["Ledger", ["Ledger.balance", "Ledger.credit"]]]),
   });
   assert.equal(detectValueObjects(ctx).length, 0);
 });
@@ -222,6 +280,14 @@ test("detectEntities — fires on 'large-class' stereotype with entity shape (Fa
   // just oversized — surfacing them as entity does not contradict
   // their anti-pattern classification (detection layer + L6 patterns
   // continue to flag them as god-class for ratings + violations).
+  //
+  // Fathom row l7b-stereotype-vocabulary-drift (3.3.11): the entity-shape
+  // gate itself moved OWNER-side into `classRole` (fields>=3 AND
+  // non-accessor-non-ctor methods>=3, computed by
+  // `nodegraph-analysis`'s `classRole` derivation) — the hand-rolled
+  // fields/methods recount that used to live in this detector is
+  // deleted. This fixture's `classRoles` entry stands in for that
+  // owner-side computation.
   const ctx = buildContext({
     elements: [
       { id: "BigEntity", name: "BigEntity", kind: "class" },
@@ -233,6 +299,7 @@ test("detectEntities — fires on 'large-class' stereotype with entity shape (Fa
       { id: "BigEntity.recordEvent", name: "recordEvent", kind: "method" },
     ],
     classStereotypes: new Map([["BigEntity", "large-class"]]),
+    classRoles: new Map([["BigEntity", "entity-candidate"]]),
     childrenOf: new Map([
       [
         "BigEntity",
@@ -257,6 +324,9 @@ test("detectEntities — does NOT fire on 'large-class' lacking entity shape (Fa
   // A large-class with too few fields (< 3) doesn't have entity shape —
   // it's an oversized procedural module, not a domain entity. Stays
   // unclassified at L7b. Same threshold as the existing entity rule.
+  // Fathom row 3.3.11: `classRoles` mirrors the real owner-side gate
+  // outcome (fields<3 → CLASS_ROLE["large-class"] default `"other"`,
+  // no entity-candidate override).
   const ctx = buildContext({
     elements: [
       { id: "Procedural", name: "Procedural", kind: "class" },
@@ -267,6 +337,7 @@ test("detectEntities — does NOT fire on 'large-class' lacking entity shape (Fa
       { id: "Procedural.doD", name: "doD", kind: "method" },
     ],
     classStereotypes: new Map([["Procedural", "large-class"]]),
+    classRoles: new Map([["Procedural", "other"]]),
     childrenOf: new Map([
       [
         "Procedural",
@@ -283,6 +354,55 @@ test("detectEntities — does NOT fire on 'large-class' lacking entity shape (Fa
   assert.equal(
     detectEntities(ctx).find((e) => e.name === "Procedural"),
     undefined,
+  );
+});
+
+// Fathom row l7b-stereotype-vocabulary-drift (3.3.11) — SANCTIONED DELTA
+// (entity-gate tightening): the pre-migration hand-rolled gate
+// (`fields.length>=3 && methods.length>=3`, counting EVERY method-like
+// child) is DELETED — the owner-side `classRole` gate is tighter (it
+// excludes constructors/destructors/syntactic-accessors from the
+// "behavior" method count). This fixture has 4 fields and 4
+// method-shaped children (3 accessors + 1 ctor) — it WOULD have passed
+// the old hand gate (methods.length===4>=3) — but the owner-side
+// judgment (simulated via `classRoles`) is `"other"` because none of
+// those 4 are real behavior methods. Proves detectEntities defers
+// entirely to `classRole` and no longer recomputes shape itself.
+test("detectEntities — large-class with old-gate-passing field/method COUNTS but owner classRole 'other' does NOT fire (3.3.11 tightening)", () => {
+  const ctx = buildContext({
+    elements: [
+      { id: "ThinWrapper", name: "ThinWrapper", kind: "class" },
+      { id: "ThinWrapper.a", name: "a", kind: "field" },
+      { id: "ThinWrapper.b", name: "b", kind: "field" },
+      { id: "ThinWrapper.c", name: "c", kind: "field" },
+      { id: "ThinWrapper.d", name: "d", kind: "field" },
+      { id: "ThinWrapper.ctor", name: "ThinWrapper", kind: "constructor" },
+      { id: "ThinWrapper.getA", name: "getA", kind: "accessor" },
+      { id: "ThinWrapper.getB", name: "getB", kind: "accessor" },
+      { id: "ThinWrapper.getC", name: "getC", kind: "accessor" },
+    ],
+    classStereotypes: new Map([["ThinWrapper", "large-class"]]),
+    classRoles: new Map([["ThinWrapper", "other"]]),
+    childrenOf: new Map([
+      [
+        "ThinWrapper",
+        [
+          "ThinWrapper.a",
+          "ThinWrapper.b",
+          "ThinWrapper.c",
+          "ThinWrapper.d",
+          "ThinWrapper.ctor",
+          "ThinWrapper.getA",
+          "ThinWrapper.getB",
+          "ThinWrapper.getC",
+        ],
+      ],
+    ]),
+  });
+  assert.equal(
+    detectEntities(ctx).find((e) => e.name === "ThinWrapper"),
+    undefined,
+    "owner-side classRole 'other' must reject even though field/method raw COUNTS would have passed the deleted hand gate",
   );
 });
 
@@ -317,6 +437,11 @@ test("detectAggregateRoots — fires on entity with the most inbound refs in clu
       ["OrderLine", "entity"],
       ["OrderItem", "entity"],
     ]),
+    classRoles: new Map([
+      ["Order", "entity-candidate"],
+      ["OrderLine", "entity-candidate"],
+      ["OrderItem", "entity-candidate"],
+    ]),
     referencesEdges: [
       { source: "OrderLine", target: "Order" },
       { source: "OrderItem", target: "Order" },
@@ -342,6 +467,7 @@ test("detectAggregateRoots — doesn't fire when cluster has only one entity", (
   const ctx = buildContext({
     elements: [{ id: "Solo", name: "Solo", kind: "class" }],
     classStereotypes: new Map([["Solo", "entity"]]),
+    classRoles: new Map([["Solo", "entity-candidate"]]),
     clusterByElement: new Map([["Solo", "c1"]]),
   });
   const entities = detectEntities(ctx);
@@ -371,6 +497,10 @@ test("detectAggregateRoots — single-edge dominance is flagged low-support via 
     classStereotypes: new Map([
       ["A", "entity"],
       ["B", "entity"],
+    ]),
+    classRoles: new Map([
+      ["A", "entity-candidate"],
+      ["B", "entity-candidate"],
     ]),
     referencesEdges: [{ source: "B", target: "A" }],
     clusterByElement: new Map([
@@ -412,6 +542,14 @@ test("detectAggregateRoots — dominanceSupport distinguishes 0.9-from-one-edge 
       ["R4", "entity"],
       ["R5", "entity"],
     ]),
+    classRoles: new Map([
+      ["Root", "entity-candidate"],
+      ["R1", "entity-candidate"],
+      ["R2", "entity-candidate"],
+      ["R3", "entity-candidate"],
+      ["R4", "entity-candidate"],
+      ["R5", "entity-candidate"],
+    ]),
     referencesEdges: [
       { source: "R1", target: "Root" },
       { source: "R2", target: "Root" },
@@ -437,13 +575,14 @@ test("detectAggregateRoots — dominanceSupport distinguishes 0.9-from-one-edge 
 
 // --- detectDomainServices -------------------------------------------------
 
-test("detectDomainServices — fires on controller-stereotype class with no fields", () => {
+test("detectDomainServices — fires on 'service' classRole class with no fields (3.3.11)", () => {
   const ctx = buildContext({
     elements: [
       { id: "Coord", name: "OrderCoordinator", kind: "class" },
       { id: "Coord.handle", name: "handle", kind: "method" },
     ],
     classStereotypes: new Map([["Coord", "controller"]]),
+    classRoles: new Map([["Coord", "service"]]),
     childrenOf: new Map([["Coord", ["Coord.handle"]]]),
     clusters: [{ clusterId: "c1", name: "orders", memberCount: 1 }],
     clusterByElement: new Map([["Coord", "c1"]]),
@@ -460,11 +599,65 @@ test("detectDomainServices — skips adapter-flavored cluster", () => {
       { id: "Svc.send", name: "send", kind: "method" },
     ],
     classStereotypes: new Map([["Svc", "controller"]]),
+    classRoles: new Map([["Svc", "service"]]),
     childrenOf: new Map([["Svc", ["Svc.send"]]]),
     clusters: [{ clusterId: "c1", name: "email-adapter", memberCount: 1 }],
     clusterByElement: new Map([["Svc", "c1"]]),
   });
   assert.equal(detectDomainServices(ctx).length, 0);
+});
+
+// Fathom row l7b-stereotype-vocabulary-drift (3.3.11) — SANCTIONED DELTA
+// (the live drift fix, +domain-services): `service-class` (the
+// nodegraph-analysis stereotype behind every `*Service`/`*Server`/
+// `*Impl`/`*Store` heuristic name-match) maps to `classRole "service"`
+// but was NEVER in the pre-migration raw-stereotype admit set
+// (`classStereotype ∈ {controller, command}` only) — every
+// service-class-stereotyped class was silently invisible to
+// domain-service detection, corpus-wide, at 0. RED on the pre-migration
+// code (nothing fires — raw stereotype `service-class` fails the
+// `controller`/`command` check); GREEN once the gate reads `classRole`.
+test("detectDomainServices — fires on 'service-class' stereotype via classRole 'service' (3.3.11 RED/GREEN, +domain-services)", () => {
+  const ctx = buildContext({
+    elements: [
+      { id: "OrderService", name: "OrderService", kind: "class" },
+      { id: "OrderService.place", name: "place", kind: "method" },
+      { id: "OrderService.cancel", name: "cancel", kind: "method" },
+      { id: "OrderService.refund", name: "refund", kind: "method" },
+    ],
+    classStereotypes: new Map([["OrderService", "service-class"]]),
+    classRoles: new Map([["OrderService", "service"]]),
+    childrenOf: new Map([
+      ["OrderService", ["OrderService.place", "OrderService.cancel", "OrderService.refund"]],
+    ]),
+    clusters: [{ clusterId: "c1", name: "orders", memberCount: 1 }],
+    clusterByElement: new Map([["OrderService", "c1"]]),
+  });
+  const out = detectDomainServices(ctx);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].name, "OrderService");
+  assert.equal(out[0].conceptKind, "domain-service");
+});
+
+// Fathom row 3.3.11: `command` classStereotype maps to classRole
+// `command-object`, kept distinct from `service` upstream but BOTH read
+// by detectDomainServices (per the design doc: "domain-service
+// detection is expected to read BOTH roles"). Guards continue to apply.
+test("detectDomainServices — fires on 'command' stereotype via classRole 'command-object' (3.3.11)", () => {
+  const ctx = buildContext({
+    elements: [
+      { id: "PlaceOrder", name: "PlaceOrderCommand", kind: "class" },
+      { id: "PlaceOrder.execute", name: "execute", kind: "method" },
+    ],
+    classStereotypes: new Map([["PlaceOrder", "command"]]),
+    classRoles: new Map([["PlaceOrder", "command-object"]]),
+    childrenOf: new Map([["PlaceOrder", ["PlaceOrder.execute"]]]),
+    clusters: [{ clusterId: "c1", name: "orders", memberCount: 1 }],
+    clusterByElement: new Map([["PlaceOrder", "c1"]]),
+  });
+  const out = detectDomainServices(ctx);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].conceptKind, "domain-service");
 });
 
 // --- detectBoundedContexts ------------------------------------------------
@@ -703,6 +896,10 @@ test("detectEntities — rejects helper-module name suffix (Fathom 5.0.43 / roun
       { id: "CognitiveHelpers.m3", name: "m3", kind: "method" },
     ],
     classStereotypes: new Map([["CognitiveHelpers", "entity"]]),
+    // Fathom row 3.3.11: classRole admits (entity-candidate) so this
+    // fixture actually exercises the helper-module GUARD under the new
+    // gate, not just an absent-role no-op.
+    classRoles: new Map([["CognitiveHelpers", "entity-candidate"]]),
     childrenOf: new Map([
       ["CognitiveHelpers", [
         "CognitiveHelpers.f1", "CognitiveHelpers.f2", "CognitiveHelpers.f3",
@@ -734,6 +931,9 @@ test("detectDomainServices — rejects helper-module name suffix (Fathom 5.0.43 
       { id: "AnalysisHelpers.m1", name: "m1", kind: "method" },
     ],
     classStereotypes: new Map([["AnalysisHelpers", "controller"]]),
+    // Fathom row 3.3.11: classRole admits (service) so this fixture
+    // exercises the helper-module GUARD under the new gate.
+    classRoles: new Map([["AnalysisHelpers", "service"]]),
     childrenOf: new Map([["AnalysisHelpers", ["AnalysisHelpers.m1"]]]),
   });
   assert.equal(detectDomainServices(ctx).length, 0);
@@ -822,6 +1022,7 @@ test("detectEntities — rejects element under *-fixtures dir (5.0.14.2 clause a
       { id: ":proj:fathom-test-fixtures:dotnet:01-empty.cs#Empty.name", name: "name", kind: "field" },
     ],
     classStereotypes: new Map([[":proj:fathom-test-fixtures:dotnet:01-empty.cs#Empty", "entity"]]),
+    classRoles: new Map([[":proj:fathom-test-fixtures:dotnet:01-empty.cs#Empty", "entity-candidate"]]),
     childrenOf: new Map([
       [":proj:fathom-test-fixtures:dotnet:01-empty.cs#Empty",
         [":proj:fathom-test-fixtures:dotnet:01-empty.cs#Empty.id",
@@ -850,6 +1051,7 @@ test("detectEntities — rejects element in .Tests project dir (5.0.14.2 clause 
       { id: "/repo/Foo.Tests/BarTests.cs#BarTests.name", name: "name", kind: "field" },
     ],
     classStereotypes: new Map([["/repo/Foo.Tests/BarTests.cs#BarTests", "entity"]]),
+    classRoles: new Map([["/repo/Foo.Tests/BarTests.cs#BarTests", "entity-candidate"]]),
     childrenOf: new Map([
       ["/repo/Foo.Tests/BarTests.cs#BarTests",
         ["/repo/Foo.Tests/BarTests.cs#BarTests.id",
@@ -878,6 +1080,7 @@ test("detectEntities — rejects element with *Tests.cs file suffix (5.0.14.2 cl
       { id: "/repo/src/BarTests.cs#BarTests.name", name: "name", kind: "field" },
     ],
     classStereotypes: new Map([["/repo/src/BarTests.cs#BarTests", "entity"]]),
+    classRoles: new Map([["/repo/src/BarTests.cs#BarTests", "entity-candidate"]]),
     childrenOf: new Map([
       ["/repo/src/BarTests.cs#BarTests",
         ["/repo/src/BarTests.cs#BarTests.id",
@@ -906,6 +1109,7 @@ test("detectEntities — production path with 'contest' or 'latest' in name is N
       { id: "/repo/src/ContestManager.cs#ContestManager.name", name: "name", kind: "field" },
     ],
     classStereotypes: new Map([["/repo/src/ContestManager.cs#ContestManager", "entity"]]),
+    classRoles: new Map([["/repo/src/ContestManager.cs#ContestManager", "entity-candidate"]]),
     childrenOf: new Map([
       ["/repo/src/ContestManager.cs#ContestManager",
         ["/repo/src/ContestManager.cs#ContestManager.id",
@@ -949,6 +1153,7 @@ function makeEntityCtxWithArtifact(artifactId: string): ReturnType<typeof buildC
       { id: `${elId}.f2`, name: "f2", kind: "field" },
     ],
     classStereotypes: new Map([[elId, "entity"]]),
+    classRoles: new Map([[elId, "entity-candidate"]]),
     childrenOf: new Map([[elId, [`${elId}.f1`, `${elId}.f2`]]]),
   });
 }
@@ -962,6 +1167,7 @@ function makeEntityCtxWithIdFallback(id: string): ReturnType<typeof buildContext
       { id: `${id}.f2`, name: "f2", kind: "field" },
     ],
     classStereotypes: new Map([[id, "entity"]]),
+    classRoles: new Map([[id, "entity-candidate"]]),
     childrenOf: new Map([[id, [`${id}.f1`, `${id}.f2`]]]),
   });
 }
