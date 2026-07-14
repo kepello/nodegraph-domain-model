@@ -2,6 +2,18 @@
 
 All notable changes to `@kepello/nodegraph-domain-model`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.21.0] — 2026-07-14
+
+Fathom row `overlay-projection-discards-14-of-19-facets` (3.1.0.7, the ROOT CAUSE of the naming-heuristic class `3.1.8.1`). `fathom-cli`'s abstractions runner hand-projected each L0 element down to `id`/`name`/`kind`/`language`/`artifactId` before calling `recoverDomainModel` — `baseTypes` (half the structural definition of a DDD value-object: "extends `System.Exception`" or similar) was invisible to every detector. Adds the field this row's shared facet bag lands on; **no detector reads it** — `recoverDomainModel` output is unchanged.
+
+### Added
+
+- `DomainElement.facets?: Readonly<Record<string, unknown>>` — the full L0 facet set (`@kepello/nodegraph-analysis`'s `projectElementFacets`), when the caller supplies it. Includes `annotations`/`baseTypes`/`isStatic`/`scalars`/`overridesExternalRoots` (a NEW fact from the same Fathom row: `overrides` edges to an external root, e.g. `System.Object.Equals`, previously dropped by every consumer entirely) — all previously invisible to every L7b detector. Plain structural type — no new peer-dependency. Optional, not required: making it required would force editing hundreds of hand-built `DomainElement` literals in `detectors.test.ts` for a field nothing reads yet.
+
+### Tests
+
+Suite unchanged: 103/103 pass. `npm run build` clean.
+
 ## [0.20.0] — 2026-07-14
 
 **Row `identifier-derived-verdicts-claim-deterministic-authority` (Fathom `3.1.8.1`) — STEP (a) ONLY: PROVENANCE. Operator ruling 2026-07-14: "No naming convention may define code meaning."**

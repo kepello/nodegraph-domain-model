@@ -18,6 +18,23 @@ export interface DomainElement {
    * exclusion silently skips (caller-opt-in pattern).
    */
   artifactId?: string;
+  /**
+   * Every non-administrative L0 facet the substrate carries for this
+   * element (annotations, baseTypes, isStatic, scalars, ...), projected
+   * by the caller's shared `projectElementFacets` helper (Fathom row
+   * `overlay-projection-discards-14-of-19-facets`, 3.1.0.7). Plain
+   * `Record<string, unknown>` — this package has no peer-dependency on
+   * `@kepello/nodegraph-analysis` (same decoupling rationale as every
+   * other plain-data field on this interface). Currently unconsumed by
+   * any detector — this row makes the facts ARRIVE (e.g. `baseTypes`
+   * carrying `System.Exception`/`System.Object` — half the structural
+   * signal for a DDD value-object that was previously invisible to
+   * every L7b detector); wiring a consumer is later work. Optional, not
+   * required: making it required would force editing hundreds of
+   * hand-built `DomainElement` literals across `detectors.test.ts` for a
+   * field nothing reads yet.
+   */
+  facets?: Readonly<Record<string, unknown>>;
 }
 
 export interface DomainEdge {
