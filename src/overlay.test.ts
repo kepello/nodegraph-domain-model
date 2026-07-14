@@ -47,6 +47,7 @@ test("insertConcept — persists metadata + realizedBy + partOfContext + related
     name: "User",
     clusterId: "users",
     confidenceScore: 0.85,
+    evidenceProvenance: "mixed",
     contentHash: "ch1",
     realizedByElementIds: ["User"],
     partOfContextId: "ctx-users",
@@ -71,6 +72,7 @@ test("insertConcept — idempotent on identical content-hash", () => {
     conceptKind: "value-object",
     name: "Money",
     confidenceScore: 0.8,
+    evidenceProvenance: "mixed",
     contentHash: "h",
     realizedByElementIds: ["Money"],
   });
@@ -79,6 +81,7 @@ test("insertConcept — idempotent on identical content-hash", () => {
     conceptKind: "value-object",
     name: "Money",
     confidenceScore: 0.8,
+    evidenceProvenance: "mixed",
     contentHash: "h",
     realizedByElementIds: ["Money"],
   });
@@ -94,6 +97,7 @@ test("renameConcept — updates displayName, preserves identity", () => {
     conceptKind: "entity",
     name: "User",
     confidenceScore: 0.85,
+    evidenceProvenance: "mixed",
     contentHash: "h",
     realizedByElementIds: ["User"],
   });
@@ -121,6 +125,7 @@ test("renameConcept — PRESERVES realizedBy edges through supersede (Fathom 5.0
     conceptKind: "entity",
     name: "User",
     confidenceScore: 0.85,
+    evidenceProvenance: "mixed",
     contentHash: "h1",
     realizedByElementIds: ["User", "UserImpl", "UserRepo"],
   });
@@ -146,6 +151,7 @@ test("setEnrichment — preserves realizedBy edges and writes llmEnrichment (Fat
     conceptKind: "bounded-context",
     name: "user-mgmt",
     confidenceScore: 0.9,
+    evidenceProvenance: "mixed",
     contentHash: "h1",
     realizedByElementIds: ["User", "UserImpl", "UserRepo", "UserService"],
   });
@@ -186,6 +192,7 @@ test("insertConcept — persists distinctiveness + dominanceSupport observable-s
     conceptKind: "bounded-context",
     name: "orders",
     confidenceScore: 0.9,
+    evidenceProvenance: "mixed",
     contentHash: "h-bc",
     realizedByElementIds: ["OrderService"],
     distinctiveness: 0.6,
@@ -197,6 +204,7 @@ test("insertConcept — persists distinctiveness + dominanceSupport observable-s
     conceptKind: "aggregate-root",
     name: "Order",
     confidenceScore: 0.9,
+    evidenceProvenance: "mixed",
     contentHash: "h-ar",
     realizedByElementIds: ["Order"],
     dominanceSupport: 1,
@@ -218,6 +226,7 @@ test("tombstoneConcept — removes from listConcepts", () => {
     conceptKind: "entity",
     name: "Doomed",
     confidenceScore: 0.85,
+    evidenceProvenance: "mixed",
     contentHash: "h",
     realizedByElementIds: ["Doomed"],
   });
@@ -234,6 +243,7 @@ test("conceptsByKind — filters by conceptKind", () => {
     conceptKind: "entity",
     name: "User",
     confidenceScore: 0.85,
+    evidenceProvenance: "mixed",
     contentHash: "h1",
     realizedByElementIds: ["User"],
   });
@@ -242,6 +252,7 @@ test("conceptsByKind — filters by conceptKind", () => {
     conceptKind: "value-object",
     name: "Money",
     confidenceScore: 0.85,
+    evidenceProvenance: "mixed",
     contentHash: "h2",
     realizedByElementIds: ["Money"],
   });
@@ -259,6 +270,7 @@ test("conceptsInCluster — filters by clusterId", () => {
     name: "User",
     clusterId: "users",
     confidenceScore: 0.85,
+    evidenceProvenance: "mixed",
     contentHash: "h1",
     realizedByElementIds: ["User"],
   });
@@ -268,6 +280,7 @@ test("conceptsInCluster — filters by clusterId", () => {
     name: "Payment",
     clusterId: "payments",
     confidenceScore: 0.85,
+    evidenceProvenance: "mixed",
     contentHash: "h2",
     realizedByElementIds: ["Payment"],
   });

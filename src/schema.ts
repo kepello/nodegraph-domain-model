@@ -41,7 +41,7 @@ export const DOMAIN_CONCEPT_METADATA_SCHEMA: MetadataSchema = {
   title: "Recovered domain concept",
   description:
     "A DDD-style concept recovered from L1 / L3 / L4 facts: entity, value object, aggregate root, domain service, or bounded context. Candidate; operator-overrideable via config.",
-  required: ["kind", "conceptId", "conceptKind", "name", "confidenceScore"],
+  required: ["kind", "conceptId", "conceptKind", "name", "confidenceScore", "evidenceProvenance"],
   properties: {
     kind: {
       type: "string",
@@ -101,6 +101,18 @@ export const DOMAIN_CONCEPT_METADATA_SCHEMA: MetadataSchema = {
       title: "Aggregate-root reference-count support (observable-support field)",
       description:
         "`aggregate-root` only. Fathom row 3.3.12 (overlay-confidence-honest-null-policy): total same-cluster entity-to-entity inbound references the winning entity's dominance ratio was computed over — a totalRefs=1 read is low-evidence in a way confidenceScore alone can't express. Absent for every other conceptKind.",
+    },
+    evidenceProvenance: {
+      type: "string",
+      enum: ["structural", "name", "mixed"],
+      title: "Evidence provenance",
+      description:
+        "WHERE this concept's evidence came from (Fathom row `identifier-derived-verdicts-claim-deterministic-authority`, 3.1.8.1): `structural` — decided from facts alone, no identifier read. `name` — an identifier was NECESSARY for this concept kind to ever emit. `mixed` — a structural signal fired AND a name-based rejection gate was survived. Constant per conceptKind: `entity`/`value-object`/`domain-service` are always `mixed`; `bounded-context` is always `name`; `aggregate-root` is always `structural`. REQUIRED on every concept.",
+      enumDescriptions: {
+        structural: "No identifier was read (aggregate-root).",
+        name: "An identifier was necessary for ANY emission of this kind (bounded-context).",
+        mixed: "A structural signal fired AND a name-based rejection gate was survived (entity, value-object, domain-service).",
+      },
     },
   },
 };

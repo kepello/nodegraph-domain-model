@@ -335,6 +335,9 @@ function buildMetadata(input: DomainConceptInput): DomainConceptMetadata {
     conceptKind: input.conceptKind,
     name: input.name,
     confidenceScore: input.confidenceScore,
+    // Required, not optional (Fathom row 3.1.8.1) — see
+    // `DomainConceptMetadata.evidenceProvenance`'s doc comment.
+    evidenceProvenance: input.evidenceProvenance,
   };
   if (input.displayName !== undefined) meta.displayName = input.displayName;
   if (input.clusterId !== undefined) meta.clusterId = input.clusterId;

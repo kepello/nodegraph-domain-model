@@ -19,6 +19,7 @@ export {
   RELATED_TO_EDGE_TYPE,
   ALL_CONCEPT_KINDS,
   type ConceptKind,
+  type EvidenceProvenance,
   type DomainConceptInput,
   type DomainConceptMetadata,
   type DomainConceptNode,

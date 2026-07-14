@@ -2,6 +2,24 @@
 
 All notable changes to `@kepello/nodegraph-domain-model`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.20.0] — 2026-07-14
+
+**Row `identifier-derived-verdicts-claim-deterministic-authority` (Fathom `3.1.8.1`) — STEP (a) ONLY: PROVENANCE. Operator ruling 2026-07-14: "No naming convention may define code meaning."**
+
+`ComputedConcept` / `DomainConceptMetadata` / `DomainConceptInput` gain a REQUIRED `evidenceProvenance: "structural" | "name" | "mixed"` field (mirrors `@kepello/nodegraph-analysis@3.61.0`'s `EvidenceProvenance`, same 3.1.8.1 row). **No detector behaviour changed** — same concepts, same confidence scores, only the provenance is new.
+
+### Added
+
+- `evidenceProvenance`, required, on `ComputedConcept` / `DomainConceptMetadata` / `DomainConceptInput`; persisted via `DomainModelOverlay.insertConcept` / read from `listConcepts()`. Schema `required[]` + `enumDescriptions` updated.
+- `entity` / `value-object` / `domain-service` — always `"mixed"`. Every emission from every detector path runs through name-based rejection gates (`isFixturePath` / `isHelperModule` / `OPTION_BAG_SUFFIX_RE`; `detectDomainServices` has a FOURTH: the cluster-name `/(adapter|gateway|client)/i` skip) — a verdict that SURVIVED a name-based rejection gate is `"mixed"`, not `"structural"`: the name changed the outcome (it just happened not to reject THIS candidate).
+- `bounded-context` — always `"name"`. The entire admission signal beyond raw cluster size is `distinctiveness`, computed by splitting member element NAMES into TF-IDF terms — delete that and NO bounded-context ever emits, for any cluster, regardless of size.
+- `aggregate-root` — always `"structural"`. This detector's OWN root-selection logic (which entity in a cluster wins) reads only same-cluster entity-to-entity reference COUNTS, no identifier — a separate verdict from the entity concept it crowns, which carries its own `"mixed"` provenance independently.
+
+### Tests
+
+- `src/detectors-evidence-provenance.test.ts` (new, +7) — THE RATCHET: pins the constant provenance for every `ConceptKind`, both admission paths where a detector has two (`entity`/`value-object`'s classRole path + TS-interface-shaped path).
+- Suite: **103 pass** (was 96 pre-row; +7 new). `npm run build` clean.
+
 ## [0.19.0] — 2026-07-11
 
 **The three DDD detectors (`detectDomainServices`, `detectEntities`, `detectValueObjects`) migrate off raw stereotype matching onto `@kepello/nodegraph-analysis@3.60.0`'s `classRole`/`methodRole` engine-derivation contract** — the root fix for the `l7b-stereotype-vocabulary-drift` (3.3.11) class of bug: a consumer matching raw `classStereotype`/`methodStereotype` string values silently strands whenever the upstream vocabulary expands, because nothing fails loud on the miss. `classRole`/`methodRole` move the vocabulary→role mapping OWNER-side (compile-exhaustive tables in `nodegraph-analysis`); this package's admit-lists now read the stable role projection instead. Confidence-scoring formulas are unchanged (that was `overlay-confidence-honest-null-policy` 3.3.12, shipped in 0.18.0) — this is the vocabulary/admission fix only.

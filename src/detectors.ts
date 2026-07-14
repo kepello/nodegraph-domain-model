@@ -10,7 +10,7 @@
  */
 
 import type { DomainContext, DomainClusterInfo, DomainElement } from "./context.js";
-import type { ConceptKind } from "./types.js";
+import type { ConceptKind, EvidenceProvenance } from "./types.js";
 
 export interface ComputedConcept {
   conceptKind: ConceptKind;
@@ -18,6 +18,14 @@ export interface ComputedConcept {
   clusterId?: string;
   language?: string;
   confidenceScore: number;
+  /**
+   * WHERE this concept's evidence came from (Fathom row
+   * `identifier-derived-verdicts-claim-deterministic-authority`, 3.1.8.1)
+   * — see `EvidenceProvenance`'s doc comment (types.ts) for the ground
+   * truth per `conceptKind`. REQUIRED, not optional; set at every
+   * `out.push(...)` site below.
+   */
+  evidenceProvenance: EvidenceProvenance;
   realizedByElementIds: readonly string[];
   containsConceptNames?: readonly string[];
   relatedToConceptNames?: readonly string[];
@@ -237,6 +245,17 @@ function fieldChildren(ctx: DomainContext, classId: string): DomainElement[] {
  *
  * Confidence supplemented by field-count (entities typically carry
  * ≥ 1 field; ≥ 3 is more confidently entity-shaped).
+ *
+ * **Evidence provenance (Fathom row 3.1.8.1): always `"mixed"`.** BOTH
+ * paths run every emitted candidate through THREE name-based rejection
+ * gates — `isFixturePath` (path regex), `isHelperModule` (name-suffix
+ * regex), `OPTION_BAG_SUFFIX_RE` (33-suffix name regex). A verdict that
+ * SURVIVED a name-based rejection gate is `"mixed"`, not `"structural"`
+ * — the name changed the outcome (it just happened not to reject THIS
+ * candidate). The `classRole`/interface-shape admission signal itself is
+ * structural, so this is a genuine structural+name mix, never pure
+ * `"name"` (there's no name-ONLY admission path) and never pure
+ * `"structural"` (the vetoes always ran).
  */
 export function detectEntities(ctx: DomainContext): ComputedConcept[] {
   const out: ComputedConcept[] = [];
@@ -287,6 +306,9 @@ export function detectEntities(ctx: DomainContext): ComputedConcept[] {
       clusterId,
       language: cls.language,
       confidenceScore: score,
+      // 3.1.8.1: survived the isFixturePath/isHelperModule/OPTION_BAG_SUFFIX_RE
+      // rejection gates above — see the function doc comment.
+      evidenceProvenance: "mixed",
       realizedByElementIds: [cls.id],
     });
     seenIds.add(cls.id);
@@ -324,6 +346,8 @@ export function detectEntities(ctx: DomainContext): ComputedConcept[] {
       clusterId: ctx.clusterByElement.get(el.id),
       language: el.language,
       confidenceScore: score,
+      // 3.1.8.1: same rejection-gate rationale as Path 1 above.
+      evidenceProvenance: "mixed",
       realizedByElementIds: [el.id],
     });
     seenIds.add(el.id);
@@ -346,6 +370,11 @@ export function detectEntities(ctx: DomainContext): ComputedConcept[] {
  *
  * Lower confidence than entities because the data-class /
  * shape-only combination has more false positives.
+ *
+ * **Evidence provenance (Fathom row 3.1.8.1): always `"mixed"`** — same
+ * rationale as `detectEntities`: every emitted candidate survives the
+ * same THREE name-based rejection gates (`isFixturePath` /
+ * `isHelperModule` / `OPTION_BAG_SUFFIX_RE`).
  */
 export function detectValueObjects(ctx: DomainContext): ComputedConcept[] {
   const out: ComputedConcept[] = [];
@@ -385,6 +414,9 @@ export function detectValueObjects(ctx: DomainContext): ComputedConcept[] {
       clusterId: ctx.clusterByElement.get(cls.id),
       language: cls.language,
       confidenceScore: score,
+      // 3.1.8.1: survived the isFixturePath/isHelperModule/OPTION_BAG_SUFFIX_RE
+      // rejection gates above — see the function doc comment.
+      evidenceProvenance: "mixed",
       realizedByElementIds: [cls.id],
     });
     seenIds.add(cls.id);
@@ -415,6 +447,8 @@ export function detectValueObjects(ctx: DomainContext): ComputedConcept[] {
       clusterId: ctx.clusterByElement.get(el.id),
       language: el.language,
       confidenceScore: score,
+      // 3.1.8.1: same rejection-gate rationale as Path 1 above.
+      evidenceProvenance: "mixed",
       realizedByElementIds: [el.id],
     });
   }
@@ -427,6 +461,14 @@ export function detectValueObjects(ctx: DomainContext): ComputedConcept[] {
  * in the same cluster. One per cluster, fired only when the cluster
  * has ≥ 2 entities (singleton-entity clusters are entities, not
  * aggregates). Confidence reflects dominance of has-many references.
+ *
+ * **Evidence provenance (Fathom row 3.1.8.1): always `"structural"`.**
+ * THIS detector's own admission logic (which entity in a cluster wins
+ * "root") reads only same-cluster entity-to-entity REFERENCE COUNTS — no
+ * identifier at all. The winning entity's own `entity` concept record
+ * carries its own `"mixed"` provenance (see `detectEntities`) — that's a
+ * SEPARATE verdict on a separate record; this function's OWN verdict
+ * (root-or-not, and which one) never reads a name.
  */
 export function detectAggregateRoots(
   ctx: DomainContext,
@@ -492,6 +534,9 @@ export function detectAggregateRoots(
       language: best.concept.language,
       confidenceScore: score,
       realizedByElementIds: best.concept.realizedByElementIds,
+      // 3.1.8.1: this detector's own root-selection logic reads only
+      // reference counts — see the function doc comment.
+      evidenceProvenance: "structural",
       // Fathom row 3.3.12: support-aware observable field — see
       // ComputedConcept.dominanceSupport's doc comment.
       dominanceSupport: totalRefs,
@@ -519,6 +564,13 @@ export function detectAggregateRoots(
  * which was NEVER in the pre-migration raw admit-set
  * (`classStereotype ∈ {controller, command}` only) — domain-services
  * go from 0 corpus-wide to >0.
+ *
+ * **Evidence provenance (Fathom row 3.1.8.1): always `"mixed"`** — same
+ * rejection-gate rationale as `detectEntities`/`detectValueObjects`
+ * (`isFixturePath` / `isHelperModule` / `OPTION_BAG_SUFFIX_RE`), PLUS a
+ * FOURTH name-based veto unique to this detector: the cluster-name
+ * `/(adapter|gateway|client)/i` skip below. Every emitted candidate
+ * survived all four.
  */
 export function detectDomainServices(ctx: DomainContext): ComputedConcept[] {
   const out: ComputedConcept[] = [];
@@ -554,6 +606,9 @@ export function detectDomainServices(ctx: DomainContext): ComputedConcept[] {
       clusterId,
       language: cls.language,
       confidenceScore: score,
+      // 3.1.8.1: survived the four name-based rejection gates above —
+      // see the function doc comment.
+      evidenceProvenance: "mixed",
       realizedByElementIds: [cls.id],
     });
   }
@@ -587,6 +642,15 @@ export function detectDomainServices(ctx: DomainContext): ComputedConcept[] {
  * rather than implemented: a real per-member layer-integrity check
  * would require widening `DomainContext` to carry per-element layer
  * assignments, which is out of scope for a confidence-scoring fix.
+ *
+ * **Evidence provenance (Fathom row 3.1.8.1): always `"name"`.** The
+ * ENTIRE admission signal beyond raw cluster size is `distinctiveness`,
+ * computed by splitting member ELEMENT NAMES into TF-IDF terms
+ * (`splitIdentifier`, below) — delete that and `tf.size` is always 0,
+ * `minVocabularySize` (default 5) never clears, and NO bounded-context
+ * ever emits, for any cluster, regardless of size. `minClusterSize` is a
+ * real structural gate, but it can never ADMIT alone — vocabulary
+ * evidence is unconditionally required for every emission.
  */
 export function detectBoundedContexts(
   ctx: DomainContext,
@@ -690,6 +754,10 @@ export function detectBoundedContexts(
       // is 0.5 + 0.3 + 0.1 = 0.9 (layerOk's constant +0.1 removed —
       // Fathom row 3.3.12), so a clamp against 1 is now always a no-op.
       confidenceScore: score,
+      // 3.1.8.1: vocabulary distinctiveness is name-derived and
+      // unconditionally required for every emission — see the function
+      // doc comment.
+      evidenceProvenance: "name",
       realizedByElementIds: realizedBy.map((m) => m.id),
       // Fathom row 3.3.12: support-aware observable field — see
       // ComputedConcept.distinctiveness's doc comment.

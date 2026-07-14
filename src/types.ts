@@ -28,6 +28,44 @@ export const ALL_CONCEPT_KINDS = [
   "bounded-context",
 ] as const satisfies readonly ConceptKind[];
 
+/**
+ * WHERE A CONCEPT VERDICT'S EVIDENCE CAME FROM (Fathom row
+ * `identifier-derived-verdicts-claim-deterministic-authority`, 3.1.8.1 —
+ * operator ruling 2026-07-14: "No naming convention may define code
+ * meaning."). Mirrors `@kepello/nodegraph-analysis`'s `EvidenceProvenance`
+ * (same 3.1.8.1 row) and `@kepello/nodegraph-use-cases`'s
+ * `ConfidenceProvenance` precedent — a per-package local type, same
+ * "plain-data" convention this package already follows.
+ *
+ * Ground truth per `ConceptKind` (constant, not per-instance — see
+ * `detectors.ts` for the per-detector rationale):
+ *
+ * - `entity` / `value-object` / `domain-service` — always `"mixed"`.
+ *   Every emission from every path in these three detectors runs through
+ *   THREE name-based rejection gates (`isFixturePath`, `isHelperModule`,
+ *   `OPTION_BAG_SUFFIX_RE`) — a name is necessary to EXCLUDE a candidate,
+ *   and a verdict that SURVIVED that gate had its outcome shaped by a
+ *   name (the name changed the outcome: it just happened not to reject
+ *   THIS candidate). Never `"structural"` for these three kinds.
+ * - `bounded-context` — always `"name"`. The ENTIRE admission signal
+ *   (vocabulary distinctiveness) is computed by splitting IDENTIFIER
+ *   NAMES into TF-IDF terms (`splitIdentifier`) — delete that and
+ *   `tf.size` is always 0, `minVocabularySize` never clears, and NO
+ *   bounded-context ever emits. A structural gate (`minClusterSize`)
+ *   exists too, but can never admit ALONE.
+ * - `aggregate-root` — always `"structural"`. ITS OWN admission logic
+ *   (which entity in a cluster wins "root") reads only same-cluster
+ *   entity-to-entity REFERENCE COUNTS — no identifier. (The entity it
+ *   crowns carries its OWN `"mixed"` provenance as a SEPARATE `entity`
+ *   concept record; `aggregate-root` is its own verdict.)
+ *
+ * REQUIRED on every `DomainConceptMetadata` / `DomainConceptInput` /
+ * `ComputedConcept` (never optional) — an optional field defaults to
+ * absent, and absent is exactly the ambiguity this row removes (pre-prod
+ * no-silent-degradation discipline).
+ */
+export type EvidenceProvenance = "structural" | "name" | "mixed";
+
 export interface DomainConceptMetadata {
   kind: typeof DOMAIN_CONCEPT_METADATA_KIND;
   conceptId: string;
@@ -54,6 +92,12 @@ export interface DomainConceptMetadata {
    */
   dominanceSupport?: number;
   /**
+   * WHERE this concept's evidence came from (Fathom row
+   * `identifier-derived-verdicts-claim-deterministic-authority`, 3.1.8.1)
+   * — see `EvidenceProvenance`'s doc comment. REQUIRED, not optional.
+   */
+  evidenceProvenance: EvidenceProvenance;
+  /**
    * LLM-supplied enrichment (Haiku-namer pipeline output). Persisted
    * via `DomainModelOverlay.setEnrichment` — never write directly via
    * `graph.supersedeNode` (Fathom row 5.0.39).
@@ -78,6 +122,8 @@ export interface DomainConceptInput {
   distinctiveness?: number;
   /** `aggregate-root` only — see `DomainConceptMetadata.dominanceSupport`. */
   dominanceSupport?: number;
+  /** See `DomainConceptMetadata.evidenceProvenance`. */
+  evidenceProvenance: EvidenceProvenance;
   contentHash: string;
   /** L0 elements (classes/methods/etc.) implementing this concept — `realizedBy` edge targets. */
   realizedByElementIds: readonly string[];
