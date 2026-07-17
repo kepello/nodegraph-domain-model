@@ -2,11 +2,37 @@
  * Composite domain-model recovery runner. Invokes every per-kind
  * detector against the supplied context, applies a confidence
  * threshold, and returns ordered `ComputedConcept`s with their
- * content-hashed `conceptId`.
+ * content-hashed `conceptId` — PLUS, per Fathom row 3.1.8.4
+ * (disposition-layer §S7 wave 3a), the named `refusals` for every
+ * candidate this composite (or a detector's near-miss gate) considered
+ * and refused. Refusals are RETURNED, never recorded here — wiring
+ * them through `recordRefusal` is wave 3b.
  *
  * Recovery order is deliberate: entities first (others reference
  * them), then aggregate roots (need the entity set), then value
  * objects + domain services + bounded contexts (independent).
+ *
+ * ## Claim conservation (wave-3b denominator contract)
+ *
+ * `rawCountsByKind` counts DETECTOR OUTPUT (the raw claims — the L7b
+ * selector denominator per the design's §S5). Every raw claim lands in
+ * exactly one of:
+ *   - `concepts` (persistable output),
+ *   - `mergedClaimCount` (collapsed into a same-conceptId concept by the
+ *     5.0.21.3 merge — a POSITIVE outcome, not a refusal: the claim's
+ *     realizers union into the survivor),
+ *   - a POST-CLAIM refusal (`kind-precedence-excluded` at the :62-67
+ *     precedence filter, `below-confidence-threshold` at the minConfidence
+ *     gate).
+ * So: Σ rawCountsByKind = concepts.length + mergedClaimCount +
+ * |post-claim refusals| — pinned by test.
+ *
+ * Detector-internal NEAR-MISS refusals (`no-entity-shape`, from
+ * `detectValueObjects`/`detectDomainServices`) are PRE-claim: the
+ * candidate was refused before a claim was emitted, so it is NOT in
+ * `rawCountsByKind`. In wave 3b these join the stage's IN and refused
+ * columns symmetrically (a stage declares the candidate set it COULD
+ * have considered) — they never touch the raw-claims identity above.
  */
 
 import type { DomainContext } from "./context.js";
@@ -18,6 +44,7 @@ import {
   detectEntities,
   detectValueObjects,
   type ComputedConcept,
+  type DomainModelRefusal,
 } from "./detectors.js";
 
 export interface RecoverDomainModelInput {
@@ -35,6 +62,21 @@ export interface RecoverDomainModelOptions {
 export interface RecoverDomainModelResult {
   concepts: ReadonlyArray<ComputedConcept & { conceptId: string }>;
   rawCountsByKind: ReadonlyMap<string, number>;
+  /**
+   * Wave 3a (Fathom row 3.1.8.4): every named refusal — detector
+   * near-misses (`no-entity-shape`) + the composite's post-claim gates
+   * (`kind-precedence-excluded`, `below-confidence-threshold`).
+   * Computed and returned; recording is wave 3b.
+   */
+  refusals: ReadonlyArray<DomainModelRefusal>;
+  /**
+   * Raw claims collapsed into an already-present same-conceptId concept
+   * by the 5.0.21.3 merge (EnvisionWeb measured 12 such collapses).
+   * NOT refusals — needed so wave 3b can close the L7b ledger residual
+   * to 0: Σ rawCountsByKind = concepts + mergedClaimCount + post-claim
+   * refusals.
+   */
+  mergedClaimCount: number;
 }
 
 export function recoverDomainModel(
@@ -45,9 +87,16 @@ export function recoverDomainModel(
 
   const entities = detectEntities(input.context);
   const aggregateRoots = detectAggregateRoots(input.context, entities);
-  const valueObjectsRaw = detectValueObjects(input.context);
-  const domainServicesRaw = detectDomainServices(input.context);
+  const valueObjectDetection = detectValueObjects(input.context);
+  const domainServiceDetection = detectDomainServices(input.context);
   const boundedContexts = detectBoundedContexts(input.context, { minClusterSize });
+  const valueObjectsRaw = valueObjectDetection.concepts;
+  const domainServicesRaw = domainServiceDetection.concepts;
+
+  const refusals: DomainModelRefusal[] = [
+    ...valueObjectDetection.refusals,
+    ...domainServiceDetection.refusals,
+  ];
 
   // Fathom row 5.0.32: kind-exclusivity precedence. An element classified
   // as an entity is NOT also a value-object or a domain-service. The
@@ -55,16 +104,35 @@ export function recoverDomainModel(
   // layer. DDD precedence: entity > value-object, entity > domain-service.
   // Aggregate-root is permitted to share an element with the entity it
   // anchors (the aggregate-root concept is an entity-with-extra-role).
+  //
+  // Wave 3a (3.1.8.4): exclusion here is a named POST-CLAIM refusal —
+  // `kind-precedence-excluded`. Note the domain-service arm is
+  // structurally unreachable today (DS admits classes only, on roles
+  // disjoint from `entity-candidate`; entity path 2 admits
+  // interfaces/type-aliases only) — kept defensively, so the refusal
+  // wiring covers it too, but only the value-object arm can fire (the
+  // interface-shaped entity∩VO overlap, the 5.0.32 fixture).
   const entityElementIds = new Set<string>();
   for (const e of entities) {
     for (const id of e.realizedByElementIds) entityElementIds.add(id);
   }
-  const valueObjects = valueObjectsRaw.filter(
-    (vo) => !vo.realizedByElementIds.some((id) => entityElementIds.has(id)),
-  );
-  const domainServices = domainServicesRaw.filter(
-    (ds) => !ds.realizedByElementIds.some((id) => entityElementIds.has(id)),
-  );
+  const excludeByPrecedence = (c: ComputedConcept): boolean => {
+    const overlap = c.realizedByElementIds.filter((id) => entityElementIds.has(id));
+    if (overlap.length === 0) return false;
+    refusals.push({
+      candidateRef: c.realizedByElementIds[0]!,
+      reason: "kind-precedence-excluded",
+      detail: {
+        conceptKind: c.conceptKind,
+        name: c.name,
+        excludedBy: "entity",
+        overlappingElementIds: overlap,
+      },
+    });
+    return true;
+  };
+  const valueObjects = valueObjectsRaw.filter((vo) => !excludeByPrecedence(vo));
+  const domainServices = domainServicesRaw.filter((ds) => !excludeByPrecedence(ds));
 
   const rawCountsByKind = new Map<string, number>([
     ["entity", entities.length],
@@ -82,12 +150,40 @@ export function recoverDomainModel(
     ...boundedContexts,
   ];
 
-  const withIds = all
-    .filter((c) => c.confidenceScore >= minConfidence)
-    .map((c) => ({
-      ...c,
-      conceptId: computeConceptId(c.conceptKind, c.name, c.clusterId),
-    }));
+  // Confidence gate — POST-CLAIM refusal `below-confidence-threshold`,
+  // detail {score, threshold, conceptKind} per the wave-3a contract.
+  // NOTE (wave-3a floor analysis, pinned by test): every detector's score
+  // FLOOR is ≥ 0.6 (entity 0.6 · VO 0.6 · DS 0.65 · AR > 0.6 · BC ≥ 0.7),
+  // so at the DEFAULT threshold this gate never fires on any corpus —
+  // it is live only under an operator-raised minConfidence.
+  const passed: ComputedConcept[] = [];
+  for (const c of all) {
+    if (c.confidenceScore >= minConfidence) {
+      passed.push(c);
+      continue;
+    }
+    refusals.push({
+      // Bounded-context claims are cluster-anchored; everything else is
+      // element-anchored (single realizer for entity/VO/DS; the anchor
+      // entity's realizers for AR).
+      candidateRef:
+        c.conceptKind === "bounded-context" && c.clusterId !== undefined
+          ? c.clusterId
+          : c.realizedByElementIds[0]!,
+      reason: "below-confidence-threshold",
+      detail: {
+        score: c.confidenceScore,
+        threshold: minConfidence,
+        conceptKind: c.conceptKind,
+        name: c.name,
+      },
+    });
+  }
+
+  const withIds = passed.map((c) => ({
+    ...c,
+    conceptId: computeConceptId(c.conceptKind, c.name, c.clusterId),
+  }));
 
   // Merge same-identity concepts (Fathom row 5.0.21.3): conceptId is
   // (kind, name, clusterId) — two detector hits with the same triple
@@ -142,6 +238,7 @@ export function recoverDomainModel(
     });
   }
   const filtered = [...byConceptId.values()];
+  const mergedClaimCount = withIds.length - filtered.length;
 
   filtered.sort((a, b) => {
     if (b.confidenceScore !== a.confidenceScore) {
@@ -152,5 +249,5 @@ export function recoverDomainModel(
     return a.name.localeCompare(b.name);
   });
 
-  return { concepts: filtered, rawCountsByKind };
+  return { concepts: filtered, rawCountsByKind, refusals, mergedClaimCount };
 }

@@ -45,6 +45,9 @@ export {
   detectEntities,
   detectValueObjects,
   type ComputedConcept,
+  type DetectionResult,
+  type DomainModelRefusal,
+  type DomainModelRefusalReason,
 } from "./detectors.js";
 
 // Recovery runner

@@ -2,6 +2,40 @@
 
 All notable changes to `@kepello/nodegraph-domain-model`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.22.0] — 2026-07-16
+
+**Fathom row 3.1.8.4, disposition-layer §S7 wave 3a (domain-model slice).** Two additive families: the overlay's insert path ALSO emits positive `analysis-disposition` edges (membership edges STAY — retirement is wave 4), and `recoverDomainModel` RETURNS named `refusals` (recording via `recordRefusal` is wave 3b).
+
+### Added
+
+- **Positive dispositions (overlay):** `insertConcept` emits one `analysis-disposition` edge per distinct target via `@kepello/nodegraph-dispositions`' `recordDispositions`, authored by THIS overlay's `domain-concept` mutator (the caller-mutator contract, substrate rule 5.0.42). Kinds map 1:1: `realizedBy`/`containsConcept`/`partOfContext`/`relatedTo`. Stale-edge hygiene mirrors membership's 5.1.5.1 fix AND adds stale-KIND reconciliation (a pair whose kind set changed re-emits fresh — `recordDispositions`' additive merge must not accumulate stale kinds across re-analyzes); identical re-inserts are churn-free (satisfied pairs skip the package's unconditional supersede). `renameConcept`/`setEnrichment` re-emit the disposition family through the metadata-only supersede (5.0.39 invariant, new family).
+- **PAIR-OVERLAP RULING (task question):** a concept pair CAN carry two of {`containsConcept`, `partOfContext`, `relatedTo`} — at the API level only (`DomainConceptInput` admits a shared target across the three inputs). NO producer emits the shape today: fathom-cli's `insertConcept` call passes none of the three inputs, and no detector populates `containsConceptNames`/`relatedToConceptNames`. Handled + pinned anyway (the API is public): kinds merge onto ONE edge, `subtype` = primary kind per `PRIMARY_KIND_PRECEDENCE` (`containsConcept` ≺ `partOfContext` ≺ `relatedTo`), `metadata.kinds` carries all.
+- **Refusal returns (recovery):** `RecoverDomainModelResult.refusals: {candidateRef, reason, detail}[]` over the frozen vocabulary, typed `Extract<RefusalReason, …>` against `@kepello/nodegraph-dispositions` (compile-breaks if the frozen enum drifts):
+  - `below-confidence-threshold` — the composite minConfidence gate; detail `{score, threshold, conceptKind, name}`; `candidateRef` = first realizer (clusterId for bounded-contexts).
+  - `kind-precedence-excluded` — the entity > value-object/domain-service filter; detail carries `excludedBy` + `overlappingElementIds`. (The domain-service arm is structurally unreachable today — role/kind-disjoint from every entity path — kept defensively.)
+  - `no-entity-shape` — detector-internal NEAR-MISSES: `detectValueObjects` path-1's mutator-evidence gate (`cause: "mutator-method"`), `detectDomainServices`' statefulness (`cause: "too-many-fields"`) and no-behaviour (`cause: "no-methods"`) gates. Pre-claim: NOT part of `rawCountsByKind`; wave 3b adds them to IN and refused symmetrically.
+- `RecoverDomainModelResult.mergedClaimCount` — raw claims collapsed by the 5.0.21.3 same-conceptId merge (EnvisionWeb measured 12). NOT refusals; required for wave 3b to close the L7b ledger: **Σ rawCountsByKind = concepts + mergedClaimCount + post-claim refusals** (pinned by test).
+- Per-detector near-miss classification (doc'd on each detector): entities — NONE (path 1 has no post-admission shape gate; path 2's field floor is scan-population, its `!hasEntityShape` reject is a guaranteed VO handoff); aggregate-roots — NONE (singleton clusters definitional; zero-reference clusters are absence-of-evidence); bounded-contexts — NONE this wave (the `distinctiveness` threshold discard is near-miss-SHAPED but has no scoped frozen reason and fires at corpus scale; flagged for a later wave); value-objects — mutator gate; domain-services — both shape gates. Name-hygiene vetoes (fixture/helper/option-bag/adapter-cluster) stay expected non-selections this wave (the frozen `fixture` reason remains unwired at L7b).
+
+### Changed (breaking)
+
+- `detectValueObjects` / `detectDomainServices` return `DetectionResult {concepts, refusals}` instead of `ComputedConcept[]` (the other three detectors keep their array return — the asymmetry IS the classification). New exports: `DetectionResult`, `DomainModelRefusal`, `DomainModelRefusalReason`.
+- New peer dependency: `@kepello/nodegraph-dispositions@^0.1.0`.
+
+### Fixed
+
+- **`supersedeWithMetadata` never captured `containsConcept` membership edges** — `renameConcept`/`setEnrichment` on a bounded-context silently stripped its containment membership (pre-existing; found extending the capture to the disposition family). Regression-pinned.
+
+### Findings (not fixed here)
+
+- **`too-few-fields` is unfireable at L7b:** frozen against pre-3.3.11 code — the class field/method recount it described moved owner-side into the `classRole` derivation; the remaining field floors gate the interface SCAN population (expected non-selections per the selector-denominator ruling). A frozen reason at a permanent 0% — wave-3b/measurement should confirm and the enum owner dispose.
+- **`below-confidence-threshold` is dead at the DEFAULT threshold:** every detector's score floor is ≥ 0.6 (entity 0.6 · VO 0.6 · DS 0.65 · AR > 0.6 · BC ≥ 0.7), so at default minConfidence NOTHING can fail the composite gate (pinned). It fires only under operator-raised thresholds ⇒ the home corpus's measured 9-of-289 residual must decompose as kind-precedence-excluded + merged claims.
+
+### Tests
+
+- +19 (RED-first, all 19 failing pre-fix): 9 overlay-disposition pins (`overlay-dispositions.test.ts`, incl. both pair-overlap precedence pins, stale-target/stale-kind hygiene, churn-free idempotence, 5.0.39 re-emit ×2, the containsConcept regression), 5 recovery refusal pins (threshold detail, dead-gate floor pin, precedence, near-miss surfacing, claim conservation), 5 detector classification pins.
+- Suite: **123 pass** (was 104). `npm run build` clean. End-to-end drive verified refusals + conservation + edge-family coexistence over a live in-memory substrate.
+
 ## [0.21.0] — 2026-07-14
 
 Fathom row `overlay-projection-discards-14-of-19-facets` (3.1.0.7, the ROOT CAUSE of the naming-heuristic class `3.1.8.1`). `fathom-cli`'s abstractions runner hand-projected each L0 element down to `id`/`name`/`kind`/`language`/`artifactId` before calling `recoverDomainModel` — `baseTypes` (half the structural definition of a DDD value-object: "extends `System.Exception`" or similar) was invisible to every detector. Adds the field this row's shared facet bag lands on; **no detector reads it** — `recoverDomainModel` output is unchanged.

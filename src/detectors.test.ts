@@ -116,7 +116,7 @@ test("detectValueObjects — fires on data-holder classRole with no mutator meth
     methodRoles: new Map([["Money.getAmount", "accessor"]]),
     childrenOf: new Map([["Money", ["Money.amount", "Money.getAmount"]]]),
   });
-  const out = detectValueObjects(ctx);
+  const out = detectValueObjects(ctx).concepts;
   assert.equal(out.length, 1);
   assert.equal(out[0].conceptKind, "value-object");
 });
@@ -133,7 +133,7 @@ test("detectValueObjects — doesn't fire when data-holder has a mutator-shaped 
     methodRoles: new Map([["M.setValue", "mutator"]]),
     childrenOf: new Map([["M", ["M.setValue"]]]),
   });
-  assert.equal(detectValueObjects(ctx).length, 0);
+  assert.equal(detectValueObjects(ctx).concepts.length, 0);
 });
 
 // Fathom row l7b-stereotype-vocabulary-drift (3.3.11) — SANCTIONED DELTA 2
@@ -159,7 +159,7 @@ test("detectValueObjects — fact-confirmed 'mutator' methodRole child rejects (
     methodRoles: new Map([["Ledger.credit", "mutator"]]),
     childrenOf: new Map([["Ledger", ["Ledger.balance", "Ledger.credit"]]]),
   });
-  assert.equal(detectValueObjects(ctx).length, 0);
+  assert.equal(detectValueObjects(ctx).concepts.length, 0);
 });
 
 test("detectValueObjects — fires on TS interface with ≥ 2 fields and no methods (Fathom 5.0.17)", () => {
@@ -175,7 +175,7 @@ test("detectValueObjects — fires on TS interface with ≥ 2 fields and no meth
     ],
     childrenOf: new Map([["Money", ["Money.amount", "Money.currency"]]]),
   });
-  const out = detectValueObjects(ctx);
+  const out = detectValueObjects(ctx).concepts;
   assert.equal(out.length, 1);
   assert.equal(out[0].conceptKind, "value-object");
   assert.equal(out[0].name, "Money");
@@ -189,7 +189,7 @@ test("detectValueObjects — doesn't fire on TS interface with fewer than 2 fiel
     ],
     childrenOf: new Map([["X", ["X.a"]]]),
   });
-  assert.equal(detectValueObjects(ctx).length, 0);
+  assert.equal(detectValueObjects(ctx).concepts.length, 0);
 });
 
 test("detectValueObjects — doesn't fire on TS interface with method children", () => {
@@ -202,7 +202,7 @@ test("detectValueObjects — doesn't fire on TS interface with method children",
     ],
     childrenOf: new Map([["Repo", ["Repo.id", "Repo.name", "Repo.save"]]]),
   });
-  assert.equal(detectValueObjects(ctx).length, 0);
+  assert.equal(detectValueObjects(ctx).concepts.length, 0);
 });
 
 test("detectValueObjects — rejects option-bag suffixes (Fathom 5.0.26 a)", () => {
@@ -224,7 +224,7 @@ test("detectValueObjects — rejects option-bag suffixes (Fathom 5.0.26 a)", () 
     ]),
   });
   // Neither should fire — both are option-bag-named.
-  assert.equal(detectValueObjects(ctx).length, 0);
+  assert.equal(detectValueObjects(ctx).concepts.length, 0);
 });
 
 test("detectValueObjects — rejects fixture-pathed elements (Fathom 5.0.26 b)", () => {
@@ -243,7 +243,7 @@ test("detectValueObjects — rejects fixture-pathed elements (Fathom 5.0.26 b)",
          ":Users:dev:proj:src:tests:money.ts#Money.currency"]],
     ]),
   });
-  assert.equal(detectValueObjects(ctx).length, 0);
+  assert.equal(detectValueObjects(ctx).concepts.length, 0);
 });
 
 test("detectEntities — fires on TS interface with ≥3 fields + implementor (Fathom 5.0.26 c)", () => {
@@ -587,7 +587,7 @@ test("detectDomainServices — fires on 'service' classRole class with no fields
     clusters: [{ clusterId: "c1", name: "orders", memberCount: 1 }],
     clusterByElement: new Map([["Coord", "c1"]]),
   });
-  const out = detectDomainServices(ctx);
+  const out = detectDomainServices(ctx).concepts;
   assert.equal(out.length, 1);
   assert.equal(out[0].conceptKind, "domain-service");
 });
@@ -604,7 +604,7 @@ test("detectDomainServices — skips adapter-flavored cluster", () => {
     clusters: [{ clusterId: "c1", name: "email-adapter", memberCount: 1 }],
     clusterByElement: new Map([["Svc", "c1"]]),
   });
-  assert.equal(detectDomainServices(ctx).length, 0);
+  assert.equal(detectDomainServices(ctx).concepts.length, 0);
 });
 
 // Fathom row l7b-stereotype-vocabulary-drift (3.3.11) — SANCTIONED DELTA
@@ -633,7 +633,7 @@ test("detectDomainServices — fires on 'service-class' stereotype via classRole
     clusters: [{ clusterId: "c1", name: "orders", memberCount: 1 }],
     clusterByElement: new Map([["OrderService", "c1"]]),
   });
-  const out = detectDomainServices(ctx);
+  const out = detectDomainServices(ctx).concepts;
   assert.equal(out.length, 1);
   assert.equal(out[0].name, "OrderService");
   assert.equal(out[0].conceptKind, "domain-service");
@@ -655,7 +655,7 @@ test("detectDomainServices — fires on 'command' stereotype via classRole 'comm
     clusters: [{ clusterId: "c1", name: "orders", memberCount: 1 }],
     clusterByElement: new Map([["PlaceOrder", "c1"]]),
   });
-  const out = detectDomainServices(ctx);
+  const out = detectDomainServices(ctx).concepts;
   assert.equal(out.length, 1);
   assert.equal(out[0].conceptKind, "domain-service");
 });
@@ -921,7 +921,7 @@ test("detectValueObjects — rejects helper-module name suffix (Fathom 5.0.43 / 
       ["StringHelpers", ["StringHelpers.f1", "StringHelpers.f2"]],
     ]),
   });
-  assert.equal(detectValueObjects(ctx).length, 0);
+  assert.equal(detectValueObjects(ctx).concepts.length, 0);
 });
 
 test("detectDomainServices — rejects helper-module name suffix (Fathom 5.0.43 / round-8 F6)", () => {
@@ -936,7 +936,7 @@ test("detectDomainServices — rejects helper-module name suffix (Fathom 5.0.43 
     classRoles: new Map([["AnalysisHelpers", "service"]]),
     childrenOf: new Map([["AnalysisHelpers", ["AnalysisHelpers.m1"]]]),
   });
-  assert.equal(detectDomainServices(ctx).length, 0);
+  assert.equal(detectDomainServices(ctx).concepts.length, 0);
 });
 
 test("detectBoundedContexts — rejects cluster whose class-kind members are all helper-modules (Fathom 5.0.43 / round-8 F6)", () => {
@@ -1472,4 +1472,139 @@ test("detectors — per-class lookups use the index, not Array.find (Fathom 5.0.
     0,
     `detector hot path must resolve children via the elementById index, not Array.find; got ${findCalls} find calls`,
   );
+});
+
+// --- Wave-3a near-miss refusals (Fathom row 3.1.8.4, §S7 wave 3a) ----------
+//
+// Per-detector classification (only NEAR-MISS-shaped rejects return
+// refusals; a candidate that never looked like the concept is an expected
+// non-selection and returns NOTHING):
+//
+//   detectEntities        — NO refusals. Path 1 has no post-admission shape
+//                           gate; path 2's field-floor rejects the interface
+//                           SCAN population (never-looked-like), and its
+//                           !hasEntityShape reject is a guaranteed handoff
+//                           to detectValueObjects (fields≥3 + 0 methods ⇒
+//                           VO path-2 admission) — the element categorizes.
+//   detectValueObjects    — ONE refusal site: path-1's mutator-evidence
+//                           gate (data-holder role admitted the candidate;
+//                           behaviour evidence refused it) → no-entity-shape.
+//   detectAggregateRoots  — NO refusals. Singleton-entity clusters are
+//                           definitionally not aggregates; a ≥2-entity
+//                           cluster with zero inter-entity references has
+//                           no dominance evidence to claim on (expected).
+//   detectDomainServices  — TWO refusal sites: statefulness (fields > 2)
+//                           and no-methods, both post-role-admission
+//                           evidence gates → no-entity-shape.
+//   detectBoundedContexts — NO refusals this wave. Size/vocabulary floors
+//                           + helper/realizedBy hygiene gate the CLUSTER
+//                           scan population; the distinctiveness threshold
+//                           is near-miss-SHAPED but has no scoped frozen
+//                           reason in wave 3a (below-confidence-threshold
+//                           is pinned to recovery's :86 composite gate).
+
+test("detectValueObjects — data-holder with a mutator returns a no-entity-shape NEAR-MISS refusal (wave 3a)", () => {
+  const ctx = buildContext({
+    elements: [
+      { id: "Acct", name: "Acct", kind: "class" },
+      { id: "Acct.set", name: "setBalance", kind: "method" },
+    ],
+    classStereotypes: new Map([["Acct", "data-class"]]),
+    classRoles: new Map([["Acct", "data-holder"]]),
+    methodRoles: new Map([["Acct.set", "mutator"]]),
+    childrenOf: new Map([["Acct", ["Acct.set"]]]),
+  });
+  const out = detectValueObjects(ctx);
+  assert.equal(out.concepts.length, 0);
+  assert.equal(out.refusals.length, 1);
+  assert.equal(out.refusals[0].candidateRef, "Acct");
+  assert.equal(out.refusals[0].reason, "no-entity-shape");
+  assert.equal(out.refusals[0].detail.conceptKind, "value-object");
+  assert.equal(out.refusals[0].detail.cause, "mutator-method");
+});
+
+test("detectValueObjects — scan-population rejects return NOTHING (expected non-selection, not a refusal)", () => {
+  // A 1-field interface (marker/near-empty shape) and a role-less class:
+  // neither ever looked like a value-object.
+  const ctx = buildContext({
+    elements: [
+      { id: "Marker", name: "Marker", kind: "interface" },
+      { id: "Marker.id", name: "id", kind: "field" },
+      { id: "Plain", name: "Plain", kind: "class" },
+    ],
+    childrenOf: new Map([["Marker", ["Marker.id"]]]),
+  });
+  const out = detectValueObjects(ctx);
+  assert.equal(out.concepts.length, 0);
+  assert.equal(out.refusals.length, 0);
+});
+
+test("detectDomainServices — service-role class with >2 fields returns a no-entity-shape NEAR-MISS refusal (too-many-fields)", () => {
+  const ctx = buildContext({
+    elements: [
+      { id: "OrderSvc", name: "OrderSvc", kind: "class" },
+      { id: "OrderSvc.f1", name: "a", kind: "field" },
+      { id: "OrderSvc.f2", name: "b", kind: "field" },
+      { id: "OrderSvc.f3", name: "c", kind: "field" },
+      { id: "OrderSvc.run", name: "run", kind: "method" },
+    ],
+    classStereotypes: new Map([["OrderSvc", "controller"]]),
+    classRoles: new Map([["OrderSvc", "service"]]),
+    childrenOf: new Map([
+      ["OrderSvc", ["OrderSvc.f1", "OrderSvc.f2", "OrderSvc.f3", "OrderSvc.run"]],
+    ]),
+  });
+  const out = detectDomainServices(ctx);
+  assert.equal(out.concepts.length, 0);
+  assert.equal(out.refusals.length, 1);
+  assert.equal(out.refusals[0].candidateRef, "OrderSvc");
+  assert.equal(out.refusals[0].reason, "no-entity-shape");
+  assert.equal(out.refusals[0].detail.conceptKind, "domain-service");
+  assert.equal(out.refusals[0].detail.cause, "too-many-fields");
+  assert.equal(out.refusals[0].detail.fieldCount, 3);
+});
+
+test("detectDomainServices — service-role class with 0 methods returns a no-entity-shape NEAR-MISS refusal (no-methods)", () => {
+  const ctx = buildContext({
+    elements: [{ id: "GhostSvc", name: "GhostSvc", kind: "class" }],
+    classStereotypes: new Map([["GhostSvc", "controller"]]),
+    classRoles: new Map([["GhostSvc", "service"]]),
+  });
+  const out = detectDomainServices(ctx);
+  assert.equal(out.concepts.length, 0);
+  assert.equal(out.refusals.length, 1);
+  assert.equal(out.refusals[0].candidateRef, "GhostSvc");
+  assert.equal(out.refusals[0].reason, "no-entity-shape");
+  assert.equal(out.refusals[0].detail.cause, "no-methods");
+});
+
+test("detectDomainServices — role-less classes return NOTHING (expected non-selection)", () => {
+  const ctx = buildContext({
+    elements: [
+      { id: "Plain", name: "Plain", kind: "class" },
+      { id: "Plain.run", name: "run", kind: "method" },
+    ],
+    childrenOf: new Map([["Plain", ["Plain.run"]]]),
+  });
+  const out = detectDomainServices(ctx);
+  assert.equal(out.concepts.length, 0);
+  assert.equal(out.refusals.length, 0);
+});
+
+test("detectDomainServices — hygiene vetoes (fixture/helper/option-bag/adapter-cluster) return NOTHING this wave", () => {
+  // Name-based eligibility vetoes are corpus-hygiene exclusions, not
+  // near-misses; the frozen `fixture` reason stays unwired at L7b until
+  // a wave that scopes it (wave-3a task pins the reason set).
+  const ctx = buildContext({
+    elements: [
+      { id: "src/tests/FixtureSvc", name: "FixtureSvc", kind: "class" },
+      { id: "src/tests/FixtureSvc.run", name: "run", kind: "method" },
+    ],
+    classStereotypes: new Map([["src/tests/FixtureSvc", "controller"]]),
+    classRoles: new Map([["src/tests/FixtureSvc", "service"]]),
+    childrenOf: new Map([["src/tests/FixtureSvc", ["src/tests/FixtureSvc.run"]]]),
+  });
+  const out = detectDomainServices(ctx);
+  assert.equal(out.concepts.length, 0);
+  assert.equal(out.refusals.length, 0);
 });

@@ -117,7 +117,7 @@ test("detectValueObjects — classRole path is `mixed`", () => {
     classRoles: new Map([["Money", "data-holder"]]),
     childrenOf: new Map([["Money", ["Money.amount"]]]),
   });
-  const out = detectValueObjects(ctx);
+  const out = detectValueObjects(ctx).concepts;
   assert.equal(out.length, 1);
   assert.equal(out[0].evidenceProvenance, "mixed");
 });
@@ -131,7 +131,7 @@ test("detectValueObjects — TS interface-shaped path is `mixed`", () => {
     ],
     childrenOf: new Map([["Money", ["Money.amount", "Money.currency"]]]),
   });
-  const out = detectValueObjects(ctx);
+  const out = detectValueObjects(ctx).concepts;
   assert.equal(out.length, 1);
   assert.equal(out[0].evidenceProvenance, "mixed");
 });
@@ -152,7 +152,7 @@ test("detectDomainServices — is `mixed`", () => {
     clusters: [{ clusterId: "c1", name: "orders", memberCount: 1 }],
     clusterByElement: new Map([["Coord", "c1"]]),
   });
-  const out = detectDomainServices(ctx);
+  const out = detectDomainServices(ctx).concepts;
   assert.equal(out.length, 1);
   assert.equal(out[0].evidenceProvenance, "mixed");
 });

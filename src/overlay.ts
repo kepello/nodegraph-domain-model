@@ -5,9 +5,30 @@
  *   - `containsConcept` → child concepts (bounded-context → its entities).
  *   - `partOfContext`   → bounded-context the concept lives in (at most one).
  *   - `relatedTo`       → other concepts referenced from this one.
+ *
+ * Wave 3a (Fathom row 3.1.8.4, disposition-layer §S7): the insert path
+ * ALSO emits `analysis-disposition` edges (via the dispositions overlay's
+ * `recordDispositions`, authored by THIS overlay's domain-scoped mutator
+ * per the substrate's 5.0.42 source-domain rule) — kinds map 1:1 onto the
+ * four membership families above. Membership edges STAY (both families
+ * coexist until wave 4 re-implements the read APIs over dispositions).
+ * The same-target multi-kind case (a concept pair carrying two of
+ * containsConcept/partOfContext/relatedTo) collapses to ONE edge whose
+ * `subtype` is the primary kind per PRIMARY_KIND_PRECEDENCE and whose
+ * `metadata.kinds` carries all of them — no producer emits that shape
+ * today (the CLI supplies none of the three concept-target inputs; no
+ * detector emits contains/related names), but the public
+ * `DomainConceptInput` admits it, so the overlay handles and pins it.
  */
 
 import type { Edge, GraphLayer, GraphMutator, Node } from "@kepello/nodegraph-core";
+import {
+  ANALYSIS_DISPOSITION_EDGE_TYPE,
+  makeDispositionOverlay,
+  type DispositionCandidate,
+  type DispositionOverlay,
+  type PositiveKind,
+} from "@kepello/nodegraph-dispositions";
 import {
   DOMAIN_CONCEPT_DOMAIN,
   DOMAIN_CONCEPT_INDEXES,
@@ -29,6 +50,15 @@ import {
 
 export class DomainModelOverlayImpl implements DomainModelOverlay {
   private readonly mutator: GraphMutator<typeof DOMAIN_CONCEPT_DOMAIN>;
+  /**
+   * Wave 3a (3.1.8.4): disposition-layer overlay handle. Constructed
+   * over the same graph — `registerOverlay` is idempotent (5.0.42), so
+   * this coexists with the CLI's own disposition overlay instance. Its
+   * edge writes are authored by THIS overlay's `domain-concept` mutator
+   * (the caller-mutator contract; the disposition domain's own mutator
+   * writes only reason/ledger nodes).
+   */
+  private readonly dispositions: DispositionOverlay;
 
   constructor(private readonly graph: GraphLayer) {
     // Per Fathom row 5.0.42: registerOverlay returns the domain-scoped mutator.
@@ -38,6 +68,7 @@ export class DomainModelOverlayImpl implements DomainModelOverlay {
         metadataSchema: DOMAIN_CONCEPT_METADATA_SCHEMA,
         indexes: DOMAIN_CONCEPT_INDEXES,
       });
+    this.dispositions = makeDispositionOverlay(this.graph);
   }
 
   insertConcept(input: DomainConceptInput): DomainConceptNode {
@@ -104,7 +135,80 @@ export class DomainModelOverlayImpl implements DomainModelOverlay {
       this.emitEdge(node.id, input.partOfContextId, PART_OF_CONTEXT_EDGE_TYPE);
     }
 
+    // Wave 3a (3.1.8.4): ALSO emit the positive-disposition family.
+    // Kinds map 1:1 from the four membership inputs; a target present in
+    // more than one input merges kinds onto one edge (pair-overlap case).
+    const wanted = new Map<string, Set<PositiveKind>>();
+    const want = (target: string, kind: PositiveKind): void => {
+      let set = wanted.get(target);
+      if (set === undefined) {
+        set = new Set();
+        wanted.set(target, set);
+      }
+      set.add(kind);
+    };
+    for (const t of input.realizedByElementIds) want(t, "realizedBy");
+    for (const t of input.containsConceptIds ?? []) want(t, "containsConcept");
+    for (const t of input.relatedToConceptIds ?? []) want(t, "relatedTo");
+    if (input.partOfContextId !== undefined) {
+      want(input.partOfContextId, "partOfContext");
+    }
+    this.reconcileDispositions(node.id, wanted);
+
     return asConcept(node);
+  }
+
+  /**
+   * Bring the node's outgoing `analysis-disposition` edges to exactly
+   * `wanted` (targetKey → kind set). Mirrors `emitMembership`'s 5.1.5.1
+   * stale-edge hygiene for the new family, with one addition: a target
+   * whose KIND SET changed is tombstoned and re-emitted fresh, because
+   * `recordDispositions`' kind merge is deliberately ADDITIVE (correct
+   * within one analyze; stale-kind accumulation across re-runs would be
+   * this overlay's bug, not the package's). Already-satisfied pairs are
+   * skipped entirely — `recordDispositions` supersedes unconditionally on
+   * existing pairs, and re-sending identical state every re-analyze would
+   * churn edge ids.
+   */
+  private reconcileDispositions(
+    nodeId: string,
+    wanted: ReadonlyMap<string, ReadonlySet<PositiveKind>>,
+  ): void {
+    const existing = this.graph.edgesFrom(nodeId, {
+      type: ANALYSIS_DISPOSITION_EDGE_TYPE,
+      includeDangling: true,
+    });
+    const satisfied = new Set<string>();
+    for (const e of existing) {
+      const key = e.targetId ?? e.targetRef;
+      if (key === null) continue;
+      const wantedKinds = wanted.get(key);
+      if (wantedKinds !== undefined && kindSetEquals(edgeKinds(e), wantedKinds)) {
+        satisfied.add(key);
+        continue;
+      }
+      // Stale target (5.1.5.1 mirror) or stale kind set — tombstone;
+      // wanted pairs re-emit fresh below.
+      this.mutator.tombstoneEdge(e.id);
+    }
+    const batch: DispositionCandidate[] = [];
+    for (const [target, kinds] of wanted) {
+      if (satisfied.has(target)) continue;
+      // Same target resolution as emitEdge: resolved node id when the
+      // target names a node, dangling targetRef otherwise — the two
+      // families stay parallel per-target.
+      const resolved = this.graph.getNodeById(target) !== undefined;
+      for (const kind of kinds) {
+        batch.push(
+          resolved
+            ? { sourceId: nodeId, targetId: target, kind }
+            : { sourceId: nodeId, targetRef: target, kind },
+        );
+      }
+    }
+    if (batch.length > 0) {
+      this.dispositions.recordDispositions(this.mutator, batch);
+    }
   }
 
   private emitMembership(
@@ -187,11 +291,14 @@ export class DomainModelOverlayImpl implements DomainModelOverlay {
   /**
    * Shared supersede helper for concept-metadata-only changes (rename,
    * enrichment writes). Reads the prior tip's outgoing `realizedBy` +
-   * `partOfContext` + `relatedTo` edges, supersedes with the
+   * `partOfContext` + `relatedTo` + `containsConcept` edges AND the
+   * wave-3a `analysis-disposition` family, supersedes with the
    * transformed metadata, then re-emits the SAME edge set from the
    * new node UUID. Per Fathom row 5.0.39 — raw `supersedeNode`
    * cascades the prior tip's outgoing edges to tombstoned, so every
    * metadata-only supersede MUST re-emit edges to preserve identity.
+   * (`containsConcept` was missing from this capture until wave 3a —
+   * the regression pin lives in overlay-dispositions.test.ts.)
    */
   private supersedeWithMetadata(
     conceptId: string,
@@ -225,6 +332,23 @@ export class DomainModelOverlayImpl implements DomainModelOverlay {
     const realizedBy = captureTargets(REALIZED_BY_EDGE_TYPE);
     const relatedTo = captureTargets(RELATED_TO_EDGE_TYPE);
     const partOfContext = captureTargets(PART_OF_CONTEXT_EDGE_TYPE);
+    // Wave-3a regression fix: containsConcept was NEVER captured here —
+    // renaming/enriching a bounded-context silently stripped its
+    // containment membership (found while extending this capture to the
+    // disposition family; pinned by overlay-dispositions.test.ts).
+    const containsConcept = captureTargets(CONTAINS_CONCEPT_EDGE_TYPE);
+    // Wave 3a (3.1.8.4): capture the disposition family too — same
+    // 5.0.39 invariant, new edge family. (targetKey, kind set) per edge.
+    const dispositionWanted = new Map<string, ReadonlySet<PositiveKind>>();
+    for (const e of this.graph.edgesFrom(existing.id, {
+      type: ANALYSIS_DISPOSITION_EDGE_TYPE,
+      includeDangling: true,
+    })) {
+      const key = e.targetId ?? e.targetRef;
+      if (key === null) continue;
+      const kinds = edgeKinds(e);
+      if (kinds.length > 0) dispositionWanted.set(key, new Set(kinds));
+    }
     const next = transform(prior);
     const node = this.mutator.supersedeNode(existing.id, {
       contentHash: existing.contentHash,
@@ -234,6 +358,9 @@ export class DomainModelOverlayImpl implements DomainModelOverlay {
     for (const t of relatedTo) this.emitEdge(node.id, t, RELATED_TO_EDGE_TYPE);
     for (const t of partOfContext)
       this.emitEdge(node.id, t, PART_OF_CONTEXT_EDGE_TYPE);
+    for (const t of containsConcept)
+      this.emitEdge(node.id, t, CONTAINS_CONCEPT_EDGE_TYPE);
+    this.reconcileDispositions(node.id, dispositionWanted);
     return asConcept(node);
   }
 
@@ -354,6 +481,27 @@ function buildMetadata(input: DomainConceptInput): DomainConceptMetadata {
 
 function asConcept(node: Node): DomainConceptNode {
   return node as DomainConceptNode;
+}
+
+/** Kinds carried on an `analysis-disposition` edge (`metadata.kinds`). */
+function edgeKinds(edge: Edge): PositiveKind[] {
+  const metadata = edge.metadata;
+  if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
+    return [];
+  }
+  const kinds = (metadata as { kinds?: unknown }).kinds;
+  return Array.isArray(kinds) ? (kinds as PositiveKind[]) : [];
+}
+
+function kindSetEquals(
+  kinds: readonly PositiveKind[],
+  wanted: ReadonlySet<PositiveKind>,
+): boolean {
+  if (kinds.length !== wanted.size) return false;
+  for (const k of kinds) {
+    if (!wanted.has(k)) return false;
+  }
+  return true;
 }
 
 export function makeDomainModelOverlay(graph: GraphLayer): DomainModelOverlay {

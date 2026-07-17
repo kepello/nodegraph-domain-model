@@ -9,8 +9,61 @@
  * (3.1.1.2) which would give Wirfs-Brock role labels for sharper rules.
  */
 
+import type { RefusalReason } from "@kepello/nodegraph-dispositions";
 import type { DomainContext, DomainClusterInfo, DomainElement } from "./context.js";
 import type { ConceptKind, EvidenceProvenance } from "./types.js";
+
+/**
+ * The refusal reasons THIS package can actually emit (Fathom row 3.1.8.4,
+ * disposition-layer §S4/§S7 wave 3a). `Extract<>` ties the local subset to
+ * the frozen closed vocabulary in `@kepello/nodegraph-dispositions` — if a
+ * member is ever dropped from the frozen enum this fails to compile.
+ *
+ * Deliberately NOT in the subset:
+ *  - `too-few-fields` — frozen for L7b ("candidate CLASS has too few
+ *    fields…") against pre-3.3.11 code: the hand-rolled class field/method
+ *    recount it described was DELETED from `detectEntities` (moved
+ *    owner-side into the `classRole` derivation — see the SANCTIONED DELTA
+ *    note there). The only field-floor gates left (`fields < 3` entity
+ *    path 2 / `fields < 2` VO path 2) reject the interface SCAN population
+ *    — expected non-selections under the design's selector-denominator
+ *    ruling, never near-misses. Unfireable here until a detector regains a
+ *    post-admission field gate.
+ *  - `fixture` — a real frozen L7b reason, but the wave-3a task scopes the
+ *    L7b refusal set to threshold/precedence/near-miss-shape; the
+ *    name-hygiene vetoes (fixture/helper/option-bag/adapter-cluster) stay
+ *    expected non-selections this wave.
+ */
+export type DomainModelRefusalReason = Extract<
+  RefusalReason,
+  "below-confidence-threshold" | "kind-precedence-excluded" | "no-entity-shape"
+>;
+
+/**
+ * One refused candidate, per the wave-3a return contract
+ * (`refusals: {candidateRef, reason, detail}[]`). `candidateRef` is the
+ * refused candidate's most specific stable reference: the L0 element id
+ * for element-anchored claims, the clusterId for bounded-context claims.
+ * COMPUTED and returned only — recording via `recordRefusal` is wave 3b.
+ */
+export interface DomainModelRefusal {
+  readonly candidateRef: string;
+  readonly reason: DomainModelRefusalReason;
+  readonly detail: Record<string, unknown>;
+}
+
+/**
+ * Return shape for detectors that own NEAR-MISS refusal sites
+ * (`detectValueObjects`, `detectDomainServices`). Detectors with no
+ * near-miss gate (`detectEntities`, `detectAggregateRoots`,
+ * `detectBoundedContexts`) keep their `ComputedConcept[]` return — the
+ * asymmetry is the per-detector classification made visible in the
+ * signature (see the wave-3a classification comment on each detector).
+ */
+export interface DetectionResult {
+  readonly concepts: ComputedConcept[];
+  readonly refusals: DomainModelRefusal[];
+}
 
 export interface ComputedConcept {
   conceptKind: ConceptKind;
@@ -256,6 +309,18 @@ function fieldChildren(ctx: DomainContext, classId: string): DomainElement[] {
  * structural, so this is a genuine structural+name mix, never pure
  * `"name"` (there's no name-ONLY admission path) and never pure
  * `"structural"` (the vetoes always ran).
+ *
+ * **Wave-3a refusal classification (Fathom row 3.1.8.4): NO refusals.**
+ * Path 1 has no post-admission shape gate at all (the old field/method
+ * recount moved owner-side into `classRole` per 3.3.11's sanctioned
+ * delta — which is also why the frozen `too-few-fields` reason has no
+ * remaining class-candidate site here). Path 2's `fields < 3` floor
+ * rejects the interface SCAN population (never looked like an entity),
+ * and its `!hasEntityShape` reject (fields ≥ 3, 0 methods, 0
+ * implementors) is a guaranteed HANDOFF: exactly that shape is
+ * `detectValueObjects` path-2's admission (≥ 2 fields, 0 methods, same
+ * name gates already passed), so the element categorizes as a VO —
+ * refusing it here would be noise about an element that landed.
  */
 export function detectEntities(ctx: DomainContext): ComputedConcept[] {
   const out: ComputedConcept[] = [];
@@ -375,9 +440,21 @@ export function detectEntities(ctx: DomainContext): ComputedConcept[] {
  * rationale as `detectEntities`: every emitted candidate survives the
  * same THREE name-based rejection gates (`isFixturePath` /
  * `isHelperModule` / `OPTION_BAG_SUFFIX_RE`).
+ *
+ * **Wave-3a refusal classification (Fathom row 3.1.8.4):** ONE near-miss
+ * site — path 1's mutator-evidence gate. The `data-holder` classRole
+ * ADMITTED the candidate ("this looks like a value object"); the mutator
+ * child REFUSED it on behaviour evidence → `no-entity-shape` refusal
+ * (matches no recognized entity/VO/service shape: its role rules out the
+ * other two). Everything else returns NOTHING: the role gate and path 2's
+ * field-floor/pure-shape gates reject the class/interface SCAN population
+ * (never looked like a VO — a `methods > 0` interface is either already an
+ * entity via path-2 admission there, or a behaviour contract), and the
+ * name-hygiene vetoes are eligibility exclusions, not near-misses.
  */
-export function detectValueObjects(ctx: DomainContext): ComputedConcept[] {
+export function detectValueObjects(ctx: DomainContext): DetectionResult {
   const out: ComputedConcept[] = [];
+  const refusals: DomainModelRefusal[] = [];
   const seenIds = new Set<string>();
 
   // Path 1 — `classRole` gate. Fathom row l7b-stereotype-vocabulary-drift
@@ -403,7 +480,21 @@ export function detectValueObjects(ctx: DomainContext): ComputedConcept[] {
     const hasMutator = methods.some(
       (m) => ctx.methodRoles.get(m.id) === "mutator",
     );
-    if (hasMutator) continue;
+    if (hasMutator) {
+      // Wave-3a NEAR-MISS refusal (Fathom row 3.1.8.4): the classRole
+      // admitted this candidate as value-object-shaped; mutator evidence
+      // refused it. Returned, not recorded — recording is wave 3b.
+      refusals.push({
+        candidateRef: cls.id,
+        reason: "no-entity-shape",
+        detail: {
+          conceptKind: "value-object",
+          cause: "mutator-method",
+          name: cls.name,
+        },
+      });
+      continue;
+    }
     const fields = fieldChildren(ctx, cls.id);
     let score = 0.7;
     if (fields.length >= 1) score += 0.1;
@@ -453,7 +544,7 @@ export function detectValueObjects(ctx: DomainContext): ComputedConcept[] {
     });
   }
 
-  return out;
+  return { concepts: out, refusals };
 }
 
 /**
@@ -469,6 +560,15 @@ export function detectValueObjects(ctx: DomainContext): ComputedConcept[] {
  * carries its own `"mixed"` provenance (see `detectEntities`) — that's a
  * SEPARATE verdict on a separate record; this function's OWN verdict
  * (root-or-not, and which one) never reads a name.
+ *
+ * **Wave-3a refusal classification (Fathom row 3.1.8.4): NO refusals.**
+ * A singleton-entity cluster is DEFINITIONALLY not an aggregate (the doc
+ * line above), and a ≥ 2-entity cluster with zero inter-entity references
+ * has no dominance evidence to claim on — absence of evidence is an
+ * expected non-selection, not a near-miss, and no frozen reason describes
+ * it. (If corpus measurement ever shows "no clear root" is operator-
+ * meaningful, that is a reason-enum change, not a mapping onto
+ * `no-entity-shape`.)
  */
 export function detectAggregateRoots(
   ctx: DomainContext,
@@ -571,9 +671,20 @@ export function detectAggregateRoots(
  * FOURTH name-based veto unique to this detector: the cluster-name
  * `/(adapter|gateway|client)/i` skip below. Every emitted candidate
  * survived all four.
+ *
+ * **Wave-3a refusal classification (Fathom row 3.1.8.4):** TWO near-miss
+ * sites, both post-role-admission evidence gates → `no-entity-shape`:
+ * the statefulness gate (`fields > 2` — the role said service, the field
+ * count said stateful object) and the no-methods gate (a service-role
+ * class with zero behaviour). Gate order is load-bearing for refusal
+ * semantics: first-gate-wins — a fixture-pathed stateful "service" is a
+ * hygiene exclusion (nothing returned), never a near-miss, because the
+ * name vetoes run first; the adapter-cluster veto runs LAST, so a
+ * stateful class in an adapter cluster still reports its shape refusal.
  */
-export function detectDomainServices(ctx: DomainContext): ComputedConcept[] {
+export function detectDomainServices(ctx: DomainContext): DetectionResult {
   const out: ComputedConcept[] = [];
+  const refusals: DomainModelRefusal[] = [];
   for (const cls of classes(ctx)) {
     const role = ctx.classRoles.get(cls.id);
     if (role !== "service" && role !== "command-object") continue;
@@ -586,9 +697,35 @@ export function detectDomainServices(ctx: DomainContext): ComputedConcept[] {
     // Fathom 5.0.26 (a): reject option-bag-named classes.
     if (OPTION_BAG_SUFFIX_RE.test(cls.name)) continue;
     const fields = fieldChildren(ctx, cls.id);
-    if (fields.length > 2) continue;
+    if (fields.length > 2) {
+      // Wave-3a NEAR-MISS refusal (Fathom row 3.1.8.4): role-admitted,
+      // refused on statefulness evidence.
+      refusals.push({
+        candidateRef: cls.id,
+        reason: "no-entity-shape",
+        detail: {
+          conceptKind: "domain-service",
+          cause: "too-many-fields",
+          fieldCount: fields.length,
+          name: cls.name,
+        },
+      });
+      continue;
+    }
     const methods = methodChildren(ctx, cls.id);
-    if (methods.length === 0) continue;
+    if (methods.length === 0) {
+      // Wave-3a NEAR-MISS refusal: role-admitted, but no behaviour at all.
+      refusals.push({
+        candidateRef: cls.id,
+        reason: "no-entity-shape",
+        detail: {
+          conceptKind: "domain-service",
+          cause: "no-methods",
+          name: cls.name,
+        },
+      });
+      continue;
+    }
     const clusterId = ctx.clusterByElement.get(cls.id);
     // Skip adapter-flavored clusters; they're infrastructure, not domain.
     if (clusterId !== undefined) {
@@ -612,7 +749,7 @@ export function detectDomainServices(ctx: DomainContext): ComputedConcept[] {
       realizedByElementIds: [cls.id],
     });
   }
-  return out;
+  return { concepts: out, refusals };
 }
 
 /**
@@ -651,6 +788,18 @@ export function detectDomainServices(ctx: DomainContext): ComputedConcept[] {
  * ever emits, for any cluster, regardless of size. `minClusterSize` is a
  * real structural gate, but it can never ADMIT alone — vocabulary
  * evidence is unconditionally required for every emission.
+ *
+ * **Wave-3a refusal classification (Fathom row 3.1.8.4): NO refusals
+ * this wave.** Size/vocabulary floors + the helper-cluster and
+ * zero-high-signal-realizedBy gates reject the CLUSTER scan population
+ * (admission/hygiene). The `distinctiveness < minDistinctiveness` gate IS
+ * near-miss-SHAPED (a fully-measured threshold discard — the L6
+ * threshold-discard analog), but wave 3a pins `below-confidence-threshold`
+ * to recovery's composite minConfidence gate and no other frozen reason
+ * describes a distinctiveness discard; it also fires at corpus scale
+ * (hundreds of clusters), far outside the measured 9-of-289 L7b residual.
+ * Explicitly classified EXPECTED this wave and flagged in the wave-3a
+ * report for a later scoping decision.
  */
 export function detectBoundedContexts(
   ctx: DomainContext,
