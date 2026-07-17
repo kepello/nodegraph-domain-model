@@ -2,6 +2,14 @@
 
 All notable changes to `@kepello/nodegraph-domain-model`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.22.1] — 2026-07-16
+
+Peer-floor sync, 3.1.8.4 wave 3a/3b sibling bumps — no code change. `@kepello/nodegraph-dispositions` peer floor `^0.1.0` → `^0.2.0` (0.x caret — did not admit the installed `0.2.0` without the bump).
+
+### Tests
+
+Suite unchanged: 123/123 pass. `npm run build` clean.
+
 ## [0.22.0] — 2026-07-16
 
 **Fathom row 3.1.8.4, disposition-layer §S7 wave 3a (domain-model slice).** Two additive families: the overlay's insert path ALSO emits positive `analysis-disposition` edges (membership edges STAY — retirement is wave 4), and `recoverDomainModel` RETURNS named `refusals` (recording via `recordRefusal` is wave 3b).
