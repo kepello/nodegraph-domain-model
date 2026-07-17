@@ -2,6 +2,28 @@
 
 All notable changes to `@kepello/nodegraph-domain-model`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.23.0] — 2026-07-16
+
+**Fathom row 3.1.8.4, disposition-layer §S7 wave 4 (domain-model slice) — the breaking wave.** The legacy per-kind membership edge family (`realizedBy`/`containsConcept`/`partOfContext`/`relatedTo` as raw edge TYPES, live alongside `analysis-disposition` edges since wave 3a) is RETIRED. `analysis-disposition` edges are now THE membership record. Public API signatures unchanged.
+
+### Changed (breaking, pre-prod — delete `.fathom/graph.db` and re-analyze)
+
+- `insertConcept` no longer emits `realizedBy`/`containsConcept`/`partOfContext`/`relatedTo`-typed edges. The `analysis-disposition` reconciliation (`reconcileDispositions`, live since wave 3a) is now the ONLY edge-hygiene path — its stale-target and stale-kind-set tombstoning also enforces `partOfContext`'s at-most-one invariant (previously a dedicated tombstone loop walking every existing `partOfContext`-typed edge; now implicit in the general (targetKey → kind-set) reconciliation, pinned by a new reassignment regression test).
+- `realizedByEdges` / `containsConceptEdges` / `relatedToEdges` / `partOfContextEdge` re-implemented over `analysis-disposition` edges, filtering `metadata.kinds` CONTAINS the wanted kind — never the edge's `type` (shared across all kinds) or `subtype` (the primary kind only). A pair-overlap-merged edge (e.g. `containsConcept` + `relatedTo` on one target) now correctly surfaces through BOTH corresponding APIs, not just its primary kind's.
+- `renameConcept` / `setEnrichment` (`supersedeWithMetadata`) capture-and-reemit ONLY the `analysis-disposition` family across the 5.0.39 metadata-only supersede — the four-way legacy capture (including the wave-3a `containsConcept` regression fix) is gone; its guarantee now lives entirely in the disposition-family capture.
+
+### Removed
+
+- **`REALIZED_BY_EDGE_TYPE` / `CONTAINS_CONCEPT_EDGE_TYPE` / `PART_OF_CONTEXT_EDGE_TYPE` / `RELATED_TO_EDGE_TYPE`** — dead with the emission they named. `REALIZED_BY_EDGE_TYPE` was imported by `fathom-mcp` (`src/phase-3/domain-model.ts`); that repo migrates off it in this same wave by a parallel mechanic (in-progress there: `domain-model-realized-by-disposition.test.ts`).
+- `emitMembership` / `emitEdge` (private helpers) — no remaining callers once membership emission was retired.
+
+### Tests
+
+- New: `partOfContext AT-MOST-ONE — reassigning to a new context tombstones the old target's partOfContext kind` — pins that `reconcileDispositions`' general reconciliation (not a dedicated loop) preserves the invariant across a context REASSIGNMENT (not just a kind-set change on the same target).
+- New: explicit read-API assertions on both pair-overlap pins (`overlay-dispositions.test.ts`) — the merged edge must appear in BOTH `containsConceptEdges`/`relatedToEdges` and `partOfContextEdge`/`relatedToEdges` respectively, guarding the "filter by `metadata.kinds`, never `subtype`" contract.
+- Reworked (SANCTIONED deltas, not deletions): the wave-3a coexistence pin now asserts the legacy edge TYPES are ABSENT (was: present alongside dispositions); `overlay.test.ts`'s `partOfContext` edge-shape pin now asserts `type === ANALYSIS_DISPOSITION_EDGE_TYPE` + `subtype === "partOfContext"` (was: `type === PART_OF_CONTEXT_EDGE_TYPE`). `recovery.test.ts`'s kind-exclusivity pin (reads `realizedByElementIds` metadata, not edges) untouched, as expected.
+- Suite: **124 pass** (was 123 pre-wave; net +1 new pin, 2 reworked). `npm run build` clean.
+
 ## [0.22.1] — 2026-07-16
 
 Peer-floor sync, 3.1.8.4 wave 3a/3b sibling bumps — no code change. `@kepello/nodegraph-dispositions` peer floor `^0.1.0` → `^0.2.0` (0.x caret — did not admit the installed `0.2.0` without the bump).

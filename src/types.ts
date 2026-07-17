@@ -125,13 +125,13 @@ export interface DomainConceptInput {
   /** See `DomainConceptMetadata.evidenceProvenance`. */
   evidenceProvenance: EvidenceProvenance;
   contentHash: string;
-  /** L0 elements (classes/methods/etc.) implementing this concept — `realizedBy` edge targets. */
+  /** L0 elements (classes/methods/etc.) implementing this concept — `realizedBy`-kind disposition targets. */
   realizedByElementIds: readonly string[];
-  /** Other concept ids this concept contains — `containsConcept` edge targets. */
+  /** Other concept ids this concept contains — `containsConcept`-kind disposition targets. */
   containsConceptIds?: readonly string[];
-  /** Bounded-context concept id this concept lives in — `partOfContext` edge target. */
+  /** Bounded-context concept id this concept lives in — `partOfContext`-kind disposition target. */
   partOfContextId?: string;
-  /** Other concept ids this one relates to — `relatedTo` edge targets. */
+  /** Other concept ids this one relates to — `relatedTo`-kind disposition targets. */
   relatedToConceptIds?: readonly string[];
 }
 
@@ -146,8 +146,9 @@ export interface DomainModelOverlay {
    * Write `llmEnrichment` onto a concept's metadata without changing
    * identity. Per Fathom row 5.0.39: this is the ONLY correct path to
    * persist LLM enrichment — calling `graph.supersedeNode` directly
-   * tombstones the concept's `realizedBy` / `partOfContext` / `relatedTo`
-   * edges and breaks membership.
+   * tombstones the concept's `analysis-disposition` edges (the
+   * `realizedBy` / `partOfContext` / `relatedTo` / `containsConcept`
+   * membership kinds) and breaks membership.
    */
   setEnrichment(
     conceptId: string,
@@ -158,21 +159,16 @@ export interface DomainModelOverlay {
   getConcept(conceptId: string): DomainConceptNode | undefined;
   conceptsByKind(conceptKind: ConceptKind): DomainConceptNode[];
   conceptsInCluster(clusterId: string): DomainConceptNode[];
-  /** All `realizedBy` edges for the concept. */
+  /**
+   * All `analysis-disposition` edges carrying the `realizedBy` kind
+   * (Fathom row 3.1.8.4, wave 4 — the legacy `realizedBy`-typed edge
+   * family is retired; this is the sole membership record).
+   */
   realizedByEdges(conceptId: string): Edge[];
-  /** All `containsConcept` edges for the concept. */
+  /** All `analysis-disposition` edges carrying the `containsConcept` kind. */
   containsConceptEdges(conceptId: string): Edge[];
-  /** All `relatedTo` edges for the concept. */
+  /** All `analysis-disposition` edges carrying the `relatedTo` kind. */
   relatedToEdges(conceptId: string): Edge[];
-  /** The `partOfContext` edge (at most one per concept). */
+  /** The `analysis-disposition` edge carrying the `partOfContext` kind (at most one per concept). */
   partOfContextEdge(conceptId: string): Edge | undefined;
 }
-
-/** Edge: concept → contained child concept (bounded context → its entities). */
-export const CONTAINS_CONCEPT_EDGE_TYPE = "containsConcept";
-/** Edge: concept → L0 element implementing it. */
-export const REALIZED_BY_EDGE_TYPE = "realizedBy";
-/** Edge: concept → bounded-context it lives in. */
-export const PART_OF_CONTEXT_EDGE_TYPE = "partOfContext";
-/** Edge: concept → other concept (DDD context map relationship; unlabeled in v1). */
-export const RELATED_TO_EDGE_TYPE = "relatedTo";

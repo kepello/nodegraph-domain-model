@@ -1,12 +1,14 @@
 /**
- * Wave-3a positive-disposition tests (Fathom row 3.1.8.4, disposition-layer
- * §S7 wave 3a — domain-model slice). Pins:
+ * Wave-3a/4 positive-disposition tests (Fathom row 3.1.8.4, disposition-layer
+ * §S7). Pins:
  *
- *   - insertConcept ALSO emits `analysis-disposition` edges (via
- *     `recordDispositions` with THIS overlay's mutator) alongside the
- *     legacy membership edges — kinds map 1:1
+ *   - insertConcept emits `analysis-disposition` edges (via
+ *     `recordDispositions` with THIS overlay's mutator) — kinds map 1:1
  *     (`realizedBy`/`containsConcept`/`partOfContext`/`relatedTo`).
- *   - Membership edges STAY (both families coexist until wave 4).
+ *   - Wave 4: the legacy membership edge family (raw `realizedBy`/
+ *     `containsConcept`/`partOfContext`/`relatedTo` edge TYPES) is
+ *     RETIRED — `analysis-disposition` edges are the ONLY membership
+ *     record now.
  *   - PAIR-OVERLAP PIN (walkthrough Q1 applied to L7b): the overlay API
  *     admits the same target concept in two of
  *     {containsConceptIds, partOfContextId, relatedToConceptIds} — that
@@ -33,13 +35,15 @@ import { strict as assert } from "node:assert";
 import { GraphLayerImpl, type GraphLayer } from "@kepello/nodegraph-core";
 import { InMemoryBackend } from "@kepello/nodegraph-core/in-memory";
 import { ANALYSIS_DISPOSITION_EDGE_TYPE } from "@kepello/nodegraph-dispositions";
-import {
-  PART_OF_CONTEXT_EDGE_TYPE,
-  REALIZED_BY_EDGE_TYPE,
-  RELATED_TO_EDGE_TYPE,
-  CONTAINS_CONCEPT_EDGE_TYPE,
-} from "./types.js";
 import { makeDomainModelOverlay } from "./overlay.js";
+
+// Wave 4 (3.1.8.4): the legacy membership family's raw edge TYPES —
+// inlined as literals since the overlay no longer exports (or emits)
+// these constants. Used only to assert their ABSENCE below.
+const LEGACY_REALIZED_BY_EDGE_TYPE = "realizedBy";
+const LEGACY_CONTAINS_CONCEPT_EDGE_TYPE = "containsConcept";
+const LEGACY_PART_OF_CONTEXT_EDGE_TYPE = "partOfContext";
+const LEGACY_RELATED_TO_EDGE_TYPE = "relatedTo";
 
 function makeGraph(): GraphLayer {
   return new GraphLayerImpl(new InMemoryBackend());
@@ -60,7 +64,7 @@ function kindsOf(e: { metadata: unknown }): string[] {
   return ((e.metadata as { kinds?: string[] })?.kinds ?? []).slice();
 }
 
-test("insertConcept — emits analysis-disposition edges for all four kinds ALONGSIDE membership edges (both families coexist)", () => {
+test("insertConcept — emits analysis-disposition edges for all four kinds; legacy membership edge TYPES are NOT emitted (wave 4 retirement)", () => {
   const graph = makeGraph();
   const overlay = makeDomainModelOverlay(graph);
   const node = overlay.insertConcept({
@@ -76,11 +80,35 @@ test("insertConcept — emits analysis-disposition edges for all four kinds ALON
     relatedToConceptIds: ["peer-1"],
   });
 
-  // Membership edges STAY — wave 3a is additive.
-  assert.equal(overlay.realizedByEdges("c1").length, 2, "realizedBy membership stays");
-  assert.equal(overlay.containsConceptEdges("c1").length, 1, "containsConcept membership stays");
-  assert.ok(overlay.partOfContextEdge("c1"), "partOfContext membership stays");
-  assert.equal(overlay.relatedToEdges("c1").length, 1, "relatedTo membership stays");
+  // Wave 4: the legacy membership edge family is RETIRED. Disposition
+  // edges are the ONLY membership record — the read APIs still report
+  // full membership (below), but no edge of the legacy raw TYPE exists.
+  assert.equal(
+    graph.edgesFrom(node.id, { type: LEGACY_REALIZED_BY_EDGE_TYPE, includeDangling: true }).length,
+    0,
+    "no legacy realizedBy-typed edges",
+  );
+  assert.equal(
+    graph.edgesFrom(node.id, { type: LEGACY_CONTAINS_CONCEPT_EDGE_TYPE, includeDangling: true }).length,
+    0,
+    "no legacy containsConcept-typed edges",
+  );
+  assert.equal(
+    graph.edgesFrom(node.id, { type: LEGACY_PART_OF_CONTEXT_EDGE_TYPE, includeDangling: true }).length,
+    0,
+    "no legacy partOfContext-typed edges",
+  );
+  assert.equal(
+    graph.edgesFrom(node.id, { type: LEGACY_RELATED_TO_EDGE_TYPE, includeDangling: true }).length,
+    0,
+    "no legacy relatedTo-typed edges",
+  );
+
+  // The read APIs are now backed ENTIRELY by analysis-disposition edges.
+  assert.equal(overlay.realizedByEdges("c1").length, 2, "realizedBy read via dispositions");
+  assert.equal(overlay.containsConceptEdges("c1").length, 1, "containsConcept read via dispositions");
+  assert.ok(overlay.partOfContextEdge("c1"), "partOfContext read via dispositions");
+  assert.equal(overlay.relatedToEdges("c1").length, 1, "relatedTo read via dispositions");
 
   // Disposition edges: one per distinct target, kinds mapped 1:1.
   const edges = dispositionEdges(graph, node.id);
@@ -128,6 +156,17 @@ test("PAIR-OVERLAP PIN — same target in containsConceptIds AND relatedToConcep
   assert.equal(edges.length, 1, "ONE collapsed edge for the overlapping pair");
   assert.equal(edges[0]!.subtype, "containsConcept", "containsConcept(10) beats relatedTo(12)");
   assert.deepEqual(kindsOf(edges[0]!).sort(), ["containsConcept", "relatedTo"]);
+
+  // Wave 4: the read APIs filter on `metadata.kinds`, never `subtype` —
+  // the merged edge MUST appear in BOTH corresponding APIs' results.
+  assert.ok(
+    overlay.containsConceptEdges("bc").some((e) => edgeTargetKey(e) === "concept-x"),
+    "merged edge appears in containsConceptEdges",
+  );
+  assert.ok(
+    overlay.relatedToEdges("bc").some((e) => edgeTargetKey(e) === "concept-x"),
+    "merged edge appears in relatedToEdges too (subtype-only filtering would drop it here)",
+  );
 });
 
 test("PAIR-OVERLAP PIN — partOfContextId also in relatedToConceptIds merges to ONE edge, subtype partOfContext (precedence)", () => {
@@ -150,6 +189,14 @@ test("PAIR-OVERLAP PIN — partOfContextId also in relatedToConceptIds merges to
   assert.equal(edges.length, 1, "ONE collapsed edge for the overlapping pair");
   assert.equal(edges[0]!.subtype, "partOfContext", "partOfContext(11) beats relatedTo(12)");
   assert.deepEqual(kindsOf(edges[0]!).sort(), ["partOfContext", "relatedTo"]);
+
+  // Wave 4: the merged edge MUST appear in BOTH corresponding APIs.
+  const partOf = overlay.partOfContextEdge("e1");
+  assert.ok(partOf && edgeTargetKey(partOf) === "ctx-orders", "merged edge appears via partOfContextEdge");
+  assert.ok(
+    overlay.relatedToEdges("e1").some((e) => edgeTargetKey(e) === "ctx-orders"),
+    "merged edge appears in relatedToEdges too (subtype-only filtering would drop it here)",
+  );
 });
 
 test("re-insert with SHRUNKEN realizedBy set — stale disposition edge tombstoned (5.1.5.1 mirror for the new family)", () => {
@@ -200,6 +247,47 @@ test("re-insert with a target's KIND SET changed — edge carries exactly the ne
     "kinds reflect the CURRENT emission only — a merged ['containsConcept','relatedTo'] here is the stale-kind accumulation bug",
   );
   assert.equal(edges[0]!.subtype, "relatedTo");
+});
+
+test("partOfContext AT-MOST-ONE — reassigning to a new context tombstones the old target's partOfContext kind (wave 4, no dedicated tombstone loop)", () => {
+  // Pre-wave-4, at-most-one was enforced by a dedicated membership
+  // tombstone loop that walked ALL existing partOfContext-typed edges
+  // regardless of target. `reconcileDispositions` has no such loop —
+  // this pins that its general (targetKey → kind-set) reconciliation
+  // still enforces the invariant: a context REASSIGNMENT (not just a
+  // kind-set change on the SAME target, :226) must MOVE the kind off
+  // the old target entirely, never leave two live `partOfContext` kinds.
+  const graph = makeGraph();
+  const overlay = makeDomainModelOverlay(graph);
+  const base = {
+    conceptId: "c-ctxmove",
+    conceptKind: "entity" as const,
+    name: "Order",
+    confidenceScore: 0.85,
+    evidenceProvenance: "mixed" as const,
+    contentHash: "h1",
+    realizedByElementIds: ["Order"],
+  };
+  overlay.insertConcept({ ...base, partOfContextId: "ctx-A" });
+  const node2 = overlay.insertConcept({ ...base, partOfContextId: "ctx-B" });
+
+  const all = dispositionEdges(graph, node2.id);
+  const partOfEdges = all.filter((e) => kindsOf(e).includes("partOfContext"));
+  assert.equal(
+    partOfEdges.length,
+    1,
+    "at most one live edge may carry the partOfContext kind after a context reassignment",
+  );
+  assert.equal(edgeTargetKey(partOfEdges[0]!), "ctx-B", "the kind moved to the new target");
+
+  const ctxA = all.find((e) => edgeTargetKey(e) === "ctx-A");
+  assert.ok(
+    ctxA === undefined,
+    "the old target's edge is tombstoned entirely (it carried no other kind)",
+  );
+
+  const partOf = overlay.partOfContextEdge("c-ctxmove");
+  assert.ok(partOf && edgeTargetKey(partOf) === "ctx-B", "partOfContextEdge reports the new target");
 });
 
 test("identical re-insert — churn-free (same disposition edge ids; satisfied pairs skip recordDispositions' unconditional supersede)", () => {
@@ -271,12 +359,14 @@ test("setEnrichment — PRESERVES analysis-disposition edges (5.0.39 invariant, 
   );
 });
 
-test("REGRESSION — renameConcept preserves containsConcept MEMBERSHIP edges (pre-existing capture gap in supersedeWithMetadata)", () => {
-  // supersedeWithMetadata captured realizedBy + relatedTo + partOfContext
-  // but NOT containsConcept — renaming a bounded-context silently
-  // stripped its containment membership. Found during the wave-3a
-  // disposition re-emit work (the new family's capture covers all four
-  // kinds; the membership family must agree).
+test("REGRESSION — renameConcept preserves containsConcept membership (pre-existing capture gap, fixed pre-wave-4; now backed by the disposition family only)", () => {
+  // Pre-wave-3a, supersedeWithMetadata's legacy-edge capture had
+  // realizedBy + relatedTo + partOfContext but NOT containsConcept —
+  // renaming a bounded-context silently stripped its containment
+  // membership. The disposition-family capture added in wave 3a always
+  // covered all four kinds; wave 4 retired the legacy family entirely,
+  // so containsConceptEdges is now backed SOLELY by that disposition
+  // capture. Kept as a regression pin against the original gap class.
   const graph = makeGraph();
   const overlay = makeDomainModelOverlay(graph);
   overlay.insertConcept({

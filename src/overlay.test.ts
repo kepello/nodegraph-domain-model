@@ -2,7 +2,9 @@
  * Domain-model overlay tests. Pins:
  *
  *   - registerOverlay idempotent.
- *   - insertConcept persists metadata + realizedBy + partOfContext + relatedTo edges.
+ *   - insertConcept persists metadata + realizedBy + partOfContext + relatedTo
+ *     (wave 4, 3.1.8.4: all four read back over `analysis-disposition`
+ *     edges — the legacy per-kind edge TYPES are retired).
  *   - insertConcept idempotent on identical content-hash.
  *   - renameConcept preserves identity.
  *   - tombstoneConcept removes from list.
@@ -13,15 +15,11 @@ import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { GraphLayerImpl, type GraphLayer } from "@kepello/nodegraph-core";
 import { InMemoryBackend } from "@kepello/nodegraph-core/in-memory";
+import { ANALYSIS_DISPOSITION_EDGE_TYPE } from "@kepello/nodegraph-dispositions";
 import {
   DOMAIN_CONCEPT_DOMAIN,
   DOMAIN_CONCEPT_METADATA_KIND,
 } from "./schema.js";
-import {
-  PART_OF_CONTEXT_EDGE_TYPE,
-  REALIZED_BY_EDGE_TYPE,
-  RELATED_TO_EDGE_TYPE,
-} from "./types.js";
 import {
   DomainModelOverlayImpl,
   makeDomainModelOverlay,
@@ -60,7 +58,11 @@ test("insertConcept — persists metadata + realizedBy + partOfContext + related
   assert.equal(overlay.realizedByEdges("c1").length, 1);
   const partOf = overlay.partOfContextEdge("c1");
   assert.ok(partOf);
-  assert.equal(partOf.type, PART_OF_CONTEXT_EDGE_TYPE);
+  // Wave 4 (3.1.8.4): the edge's raw TYPE is the shared
+  // `analysis-disposition` family, not a per-kind legacy edge type —
+  // `subtype` (the primary kind) carries `partOfContext` instead.
+  assert.equal(partOf.type, ANALYSIS_DISPOSITION_EDGE_TYPE);
+  assert.equal(partOf.subtype, "partOfContext");
   assert.equal(overlay.relatedToEdges("c1").length, 1);
 });
 

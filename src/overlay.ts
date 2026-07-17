@@ -1,17 +1,26 @@
 /**
- * Domain-model overlay implementation. Writes one node per concept
- * with outgoing edges:
- *   - `realizedBy`     → L0 elements implementing the concept.
+ * Domain-model overlay implementation. Writes one node per concept and
+ * records four kinds of membership relationship onto it as
+ * `analysis-disposition` edges (Fathom row 3.1.8.4, disposition-layer
+ * §S7 — via the dispositions overlay's `recordDispositions`, authored
+ * by THIS overlay's domain-scoped mutator per the substrate's 5.0.42
+ * source-domain rule):
+ *   - `realizedBy`      → L0 elements implementing the concept.
  *   - `containsConcept` → child concepts (bounded-context → its entities).
  *   - `partOfContext`   → bounded-context the concept lives in (at most one).
  *   - `relatedTo`       → other concepts referenced from this one.
  *
- * Wave 3a (Fathom row 3.1.8.4, disposition-layer §S7): the insert path
- * ALSO emits `analysis-disposition` edges (via the dispositions overlay's
- * `recordDispositions`, authored by THIS overlay's domain-scoped mutator
- * per the substrate's 5.0.42 source-domain rule) — kinds map 1:1 onto the
- * four membership families above. Membership edges STAY (both families
- * coexist until wave 4 re-implements the read APIs over dispositions).
+ * Wave 4 (3.1.8.4): the legacy per-kind membership edge family (raw
+ * `realizedBy`/`containsConcept`/`partOfContext`/`relatedTo` edge
+ * TYPES, wave 3a's coexistence period) is RETIRED. `analysis-disposition`
+ * edges are now THE membership record — the four read APIs
+ * (`realizedByEdges` / `containsConceptEdges` / `relatedToEdges` /
+ * `partOfContextEdge`) filter `metadata.kinds` for the wanted kind,
+ * NEVER the edge's `type` or `subtype`: a target present under more
+ * than one kind collapses to ONE edge (see below), so subtype-equality
+ * filtering would silently drop that edge from every API but its
+ * primary kind's.
+ *
  * The same-target multi-kind case (a concept pair carrying two of
  * containsConcept/partOfContext/relatedTo) collapses to ONE edge whose
  * `subtype` is the primary kind per PRIMARY_KIND_PRECEDENCE and whose
@@ -36,16 +45,12 @@ import {
   DOMAIN_CONCEPT_METADATA_SCHEMA,
   DOMAIN_CONCEPT_SCHEMA_VERSION,
 } from "./schema.js";
-import {
-  CONTAINS_CONCEPT_EDGE_TYPE,
-  PART_OF_CONTEXT_EDGE_TYPE,
-  REALIZED_BY_EDGE_TYPE,
-  RELATED_TO_EDGE_TYPE,
-  type ConceptKind,
-  type DomainConceptInput,
-  type DomainConceptMetadata,
-  type DomainConceptNode,
-  type DomainModelOverlay,
+import type {
+  ConceptKind,
+  DomainConceptInput,
+  DomainConceptMetadata,
+  DomainConceptNode,
+  DomainModelOverlay,
 } from "./types.js";
 
 export class DomainModelOverlayImpl implements DomainModelOverlay {
@@ -105,39 +110,11 @@ export class DomainModelOverlayImpl implements DomainModelOverlay {
       });
     }
 
-    this.emitMembership(node.id, input.realizedByElementIds, REALIZED_BY_EDGE_TYPE);
-    this.emitMembership(
-      node.id,
-      input.containsConceptIds ?? [],
-      CONTAINS_CONCEPT_EDGE_TYPE,
-    );
-    this.emitMembership(
-      node.id,
-      input.relatedToConceptIds ?? [],
-      RELATED_TO_EDGE_TYPE,
-    );
-
-    // partOfContext — at most one. Tombstone any drift.
-    const existingContext = this.graph.edgesFrom(node.id, {
-      type: PART_OF_CONTEXT_EDGE_TYPE,
-      includeDangling: true,
-    });
-    let hasContext = false;
-    for (const e of existingContext) {
-      const matches =
-        input.partOfContextId !== undefined &&
-        (e.targetId === input.partOfContextId ||
-          e.targetRef === input.partOfContextId);
-      if (matches) hasContext = true;
-      else this.mutator.tombstoneEdge(e.id);
-    }
-    if (!hasContext && input.partOfContextId !== undefined) {
-      this.emitEdge(node.id, input.partOfContextId, PART_OF_CONTEXT_EDGE_TYPE);
-    }
-
-    // Wave 3a (3.1.8.4): ALSO emit the positive-disposition family.
-    // Kinds map 1:1 from the four membership inputs; a target present in
-    // more than one input merges kinds onto one edge (pair-overlap case).
+    // Wave 4 (3.1.8.4): the `analysis-disposition` family is THE
+    // membership record. Kinds map 1:1 from the four inputs; a target
+    // present in more than one input merges kinds onto one edge
+    // (pair-overlap case). `reconcileDispositions` also enforces
+    // `partOfContext`'s at-most-one invariant — see its doc comment.
     const wanted = new Map<string, Set<PositiveKind>>();
     const want = (target: string, kind: PositiveKind): void => {
       let set = wanted.get(target);
@@ -160,15 +137,31 @@ export class DomainModelOverlayImpl implements DomainModelOverlay {
 
   /**
    * Bring the node's outgoing `analysis-disposition` edges to exactly
-   * `wanted` (targetKey → kind set). Mirrors `emitMembership`'s 5.1.5.1
-   * stale-edge hygiene for the new family, with one addition: a target
-   * whose KIND SET changed is tombstoned and re-emitted fresh, because
-   * `recordDispositions`' kind merge is deliberately ADDITIVE (correct
-   * within one analyze; stale-kind accumulation across re-runs would be
-   * this overlay's bug, not the package's). Already-satisfied pairs are
-   * skipped entirely — `recordDispositions` supersedes unconditionally on
-   * existing pairs, and re-sending identical state every re-analyze would
-   * churn edge ids.
+   * `wanted` (targetKey → kind set). THE membership-edge hygiene (Fathom
+   * row 5.1.5.1, originally proved on the wave-4-retired legacy
+   * membership family — this is now its sole implementation): a target
+   * missing from `wanted` is tombstoned, so repeated re-emits with
+   * shrinking sets (e.g. after a high-signal-kind filter lands) don't
+   * accumulate live edges from prior runs that the overlay's own
+   * contentHash-equality fast path would otherwise never clean up. One
+   * addition beyond that hygiene: a target whose KIND SET changed is
+   * tombstoned and re-emitted fresh, because `recordDispositions`' kind
+   * merge is deliberately ADDITIVE (correct within one analyze; stale-kind
+   * accumulation across re-runs would be this overlay's bug, not the
+   * package's). Already-satisfied pairs are skipped entirely —
+   * `recordDispositions` supersedes unconditionally on existing pairs,
+   * and re-sending identical state every re-analyze would churn edge ids.
+   *
+   * Also enforces `partOfContext`'s at-most-one invariant (previously the
+   * legacy family's own dedicated tombstone loop, walking every existing
+   * `partOfContext`-typed edge regardless of target): within one
+   * `insertConcept` call, `wanted` carries the `partOfContext` kind for
+   * at most one target, so any existing edge carrying that kind for a
+   * DIFFERENT target is either absent from `wanted` (tombstoned as
+   * stale) or present under a different kind set (tombstoned and
+   * re-emitted WITHOUT `partOfContext`) — a context reassignment always
+   * MOVES the kind, never leaves two live. Pinned in
+   * `overlay-dispositions.test.ts`.
    */
   private reconcileDispositions(
     nodeId: string,
@@ -211,50 +204,6 @@ export class DomainModelOverlayImpl implements DomainModelOverlay {
     }
   }
 
-  private emitMembership(
-    sourceId: string,
-    targets: readonly string[],
-    edgeType: string,
-  ): void {
-    const existing = this.graph.edgesFrom(sourceId, {
-      type: edgeType,
-      includeDangling: true,
-    });
-    const existingTargets = new Set<string>();
-    const existingEdgeByTarget = new Map<string, string>();
-    for (const e of existing) {
-      const key = e.targetId ?? e.targetRef;
-      if (key === null) continue;
-      existingTargets.add(key);
-      existingEdgeByTarget.set(key, e.id);
-    }
-    const wantedTargets = new Set(targets);
-    // Fathom row 5.1.5.1: tombstone stale outgoing edges whose target
-    // isn't in the new emission. Without this, repeated re-emits with
-    // shrinking realizedBy sets (e.g., after the high-signal-kind filter
-    // landed) accumulate live edges from prior runs — the overlay's
-    // own contentHash-equality fast-path means no supersede fires and
-    // the substrate cascade can't clean up.
-    for (const [target, edgeId] of existingEdgeByTarget) {
-      if (!wantedTargets.has(target)) {
-        this.mutator.tombstoneEdge(edgeId);
-      }
-    }
-    for (const target of targets) {
-      if (existingTargets.has(target)) continue;
-      this.emitEdge(sourceId, target, edgeType);
-    }
-  }
-
-  private emitEdge(sourceId: string, target: string, edgeType: string): void {
-    const byId = this.graph.getNodeById(target);
-    if (byId !== undefined) {
-      this.mutator.insertEdge({ sourceId, targetId: target, type: edgeType });
-    } else {
-      this.mutator.insertEdge({ sourceId, targetRef: target, type: edgeType });
-    }
-  }
-
   renameConcept(conceptId: string, displayName: string): DomainConceptNode {
     return this.graph.transaction(
       {
@@ -290,15 +239,19 @@ export class DomainModelOverlayImpl implements DomainModelOverlay {
 
   /**
    * Shared supersede helper for concept-metadata-only changes (rename,
-   * enrichment writes). Reads the prior tip's outgoing `realizedBy` +
-   * `partOfContext` + `relatedTo` + `containsConcept` edges AND the
-   * wave-3a `analysis-disposition` family, supersedes with the
-   * transformed metadata, then re-emits the SAME edge set from the
-   * new node UUID. Per Fathom row 5.0.39 — raw `supersedeNode`
-   * cascades the prior tip's outgoing edges to tombstoned, so every
-   * metadata-only supersede MUST re-emit edges to preserve identity.
-   * (`containsConcept` was missing from this capture until wave 3a —
-   * the regression pin lives in overlay-dispositions.test.ts.)
+   * enrichment writes). Reads the prior tip's outgoing
+   * `analysis-disposition` edges, supersedes with the transformed
+   * metadata, then re-emits the SAME (target, kind-set) pairs from the
+   * new node UUID. Per Fathom row 5.0.39 — raw `supersedeNode` cascades
+   * the prior tip's outgoing edges to tombstoned, so every metadata-only
+   * supersede MUST re-emit edges to preserve identity.
+   *
+   * Wave 4 (3.1.8.4): this is now the ONLY edge family the overlay
+   * emits — the legacy membership family this helper used to also
+   * recapture (`realizedBy`/`relatedTo`/`partOfContext`/`containsConcept`
+   * as raw edge types) was retired. (`containsConcept` was missing from
+   * that legacy capture until wave 3a found it while extending capture
+   * to this family — see overlay-dispositions.test.ts's regression pin.)
    */
   private supersedeWithMetadata(
     conceptId: string,
@@ -315,30 +268,9 @@ export class DomainModelOverlayImpl implements DomainModelOverlay {
     if (prior === null) {
       throw new Error(`Domain concept ${conceptId} has no metadata`);
     }
-    // Capture prior outgoing edge targets BEFORE supersede; the
-    // substrate's cascade will tombstone them. Re-emitted from the
-    // new tip identically after supersede.
-    const captureTargets = (edgeType: string): string[] => {
-      const out: string[] = [];
-      for (const e of this.graph.edgesFrom(existing.id, {
-        type: edgeType,
-        includeDangling: true,
-      })) {
-        const key = e.targetId ?? e.targetRef;
-        if (key !== null) out.push(key);
-      }
-      return out;
-    };
-    const realizedBy = captureTargets(REALIZED_BY_EDGE_TYPE);
-    const relatedTo = captureTargets(RELATED_TO_EDGE_TYPE);
-    const partOfContext = captureTargets(PART_OF_CONTEXT_EDGE_TYPE);
-    // Wave-3a regression fix: containsConcept was NEVER captured here —
-    // renaming/enriching a bounded-context silently stripped its
-    // containment membership (found while extending this capture to the
-    // disposition family; pinned by overlay-dispositions.test.ts).
-    const containsConcept = captureTargets(CONTAINS_CONCEPT_EDGE_TYPE);
-    // Wave 3a (3.1.8.4): capture the disposition family too — same
-    // 5.0.39 invariant, new edge family. (targetKey, kind set) per edge.
+    // Capture prior outgoing `analysis-disposition` edges BEFORE
+    // supersede; the substrate's cascade will tombstone them.
+    // (targetKey, kind set) per edge.
     const dispositionWanted = new Map<string, ReadonlySet<PositiveKind>>();
     for (const e of this.graph.edgesFrom(existing.id, {
       type: ANALYSIS_DISPOSITION_EDGE_TYPE,
@@ -354,12 +286,6 @@ export class DomainModelOverlayImpl implements DomainModelOverlay {
       contentHash: existing.contentHash,
       metadata: next as unknown,
     });
-    for (const t of realizedBy) this.emitEdge(node.id, t, REALIZED_BY_EDGE_TYPE);
-    for (const t of relatedTo) this.emitEdge(node.id, t, RELATED_TO_EDGE_TYPE);
-    for (const t of partOfContext)
-      this.emitEdge(node.id, t, PART_OF_CONTEXT_EDGE_TYPE);
-    for (const t of containsConcept)
-      this.emitEdge(node.id, t, CONTAINS_CONCEPT_EDGE_TYPE);
     this.reconcileDispositions(node.id, dispositionWanted);
     return asConcept(node);
   }
@@ -407,51 +333,42 @@ export class DomainModelOverlayImpl implements DomainModelOverlay {
   }
 
   realizedByEdges(conceptId: string): Edge[] {
-    const node = this.graph.getLiveNodeByNaturalKey(
-      DOMAIN_CONCEPT_DOMAIN,
-      conceptId,
-    );
-    if (node === undefined) return [];
-    return this.graph.edgesFrom(node.id, {
-      type: REALIZED_BY_EDGE_TYPE,
-      includeDangling: true,
-    });
+    return this.dispositionEdgesOfKind(conceptId, "realizedBy");
   }
 
   containsConceptEdges(conceptId: string): Edge[] {
-    const node = this.graph.getLiveNodeByNaturalKey(
-      DOMAIN_CONCEPT_DOMAIN,
-      conceptId,
-    );
-    if (node === undefined) return [];
-    return this.graph.edgesFrom(node.id, {
-      type: CONTAINS_CONCEPT_EDGE_TYPE,
-      includeDangling: true,
-    });
+    return this.dispositionEdgesOfKind(conceptId, "containsConcept");
   }
 
   relatedToEdges(conceptId: string): Edge[] {
+    return this.dispositionEdgesOfKind(conceptId, "relatedTo");
+  }
+
+  partOfContextEdge(conceptId: string): Edge | undefined {
+    return this.dispositionEdgesOfKind(conceptId, "partOfContext")[0];
+  }
+
+  /**
+   * Wave 4 (3.1.8.4): every membership read filters the node's
+   * `analysis-disposition` edges on `metadata.kinds` CONTAINS `kind` —
+   * never the edge's `type` (shared across all kinds) or `subtype` (the
+   * PRIMARY kind only). A pair-overlap-merged edge (e.g. containsConcept
+   * + relatedTo on one target) carries both kinds in `metadata.kinds`
+   * but only one as `subtype`; filtering on `subtype` would silently
+   * drop that edge from every API but its primary kind's.
+   */
+  private dispositionEdgesOfKind(conceptId: string, kind: PositiveKind): Edge[] {
     const node = this.graph.getLiveNodeByNaturalKey(
       DOMAIN_CONCEPT_DOMAIN,
       conceptId,
     );
     if (node === undefined) return [];
-    return this.graph.edgesFrom(node.id, {
-      type: RELATED_TO_EDGE_TYPE,
-      includeDangling: true,
-    });
-  }
-
-  partOfContextEdge(conceptId: string): Edge | undefined {
-    const node = this.graph.getLiveNodeByNaturalKey(
-      DOMAIN_CONCEPT_DOMAIN,
-      conceptId,
-    );
-    if (node === undefined) return undefined;
-    return this.graph.edgesFrom(node.id, {
-      type: PART_OF_CONTEXT_EDGE_TYPE,
-      includeDangling: true,
-    })[0];
+    return this.graph
+      .edgesFrom(node.id, {
+        type: ANALYSIS_DISPOSITION_EDGE_TYPE,
+        includeDangling: true,
+      })
+      .filter((e) => edgeKinds(e).includes(kind));
   }
 }
 
